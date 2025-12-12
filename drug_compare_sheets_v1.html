@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>DrugCompare – 讀取 Google Sheets</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{--p:#6554f6;--pl:#ebe9ff;--bg:#f5f5fb;--t:#1f2933;--s:#7b8794;}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--t)}
+    .app{max-width:520px;margin:0 auto;min-height:100vh;background:#fff;box-shadow:0 0 30px rgba(0,0,0,.06)}
+    header{padding:14px 18px 8px;position:sticky;top:0;background:#fff;z-index:9}
+    .brand{font-weight:800;color:var(--p);font-size:18px}
+    .brand span{font-weight:500;color:var(--s);font-size:12px;margin-left:6px}
+    main{padding:0 14px 70px;background:linear-gradient(180deg,#f5f5fb 0%,#fff 40%)}
+    .screen{display:none;animation:in .18s ease-out}
+    .screen.active{display:block}
+    @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+    .title{font-size:18px;font-weight:700;margin:8px 0 10px}
+    .card{background:#fff;border-radius:16px;padding:12px;box-shadow:0 8px 18px rgba(15,23,42,.08);margin-bottom:10px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{border:none;border-radius:999px;padding:8px 12px;background:var(--p);color:#fff;font-size:13px;cursor:pointer}
+    .btn.secondary{background:#e5e7eb;color:#374151}
+    .inp{width:100%;border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;background:#fff;font-size:14px;outline:none}
+    .small{font-size:12px;color:var(--s);line-height:1.4}
+    .pill{display:inline-flex;background:#eef2ff;border-radius:999px;padding:4px}
+    .pill button{border:none;background:transparent;border-radius:999px;padding:7px 12px;font-size:12px;color:var(--s);cursor:pointer}
+    .pill button.active{background:#fff;color:var(--p);box-shadow:0 4px 10px rgba(101,84,246,.25)}
+    .list{display:flex;flex-direction:column;gap:10px}
+    .item{display:flex;gap:12px;align-items:flex-start;background:#fff;border-radius:16px;padding:10px;box-shadow:0 6px 14px rgba(15,23,42,.1);cursor:pointer}
+    .thumb{width:56px;height:56px;border-radius:16px;background:#e5e7f5;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--s);flex:0 0 auto}
+    .thumb img{width:100%;height:100%;object-fit:cover}
+    .name{font-size:14px;font-weight:700;margin-bottom:2px}
+    .spec{font-size:11px;color:var(--s);margin-bottom:6px}
+    .meta{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+    .tag{font-size:10px;padding:2px 8px;border-radius:999px;background:#f3f4ff;color:var(--p)}
+    .sum{font-size:11px;color:var(--s)}
+    .sum strong{font-size:13px;color:var(--p)}
+    .nav{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:520px;background:#fff;border-top:1px solid #e0e5f2;padding:6px 22px 10px;display:flex}
+    .nav .n{flex:1;text-align:center;font-size:10px;color:var(--s);cursor:pointer}
+    .nav .i{width:22px;height:22px;border-radius:999px;margin:0 auto 2px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s)}
+    .nav .n.active{color:var(--p)}
+    .nav .n.active .i{background:var(--p);color:#fff}
+    /* bottom sheet */
+    .backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-end;justify-content:center;z-index:50}
+    .backdrop.active{display:flex}
+    .sheet{width:100%;max-width:520px;background:#fff;border-radius:20px 20px 0 0;padding:12px 14px 16px;max-height:82vh;overflow:auto;box-shadow:0 -6px 18px rgba(0,0,0,.25)}
+    .handle{width:36px;height:4px;border-radius:999px;background:#e5e7eb;margin:0 auto 10px}
+    .sheet h3{margin:0 0 4px;font-size:16px}
+    .sheet .sub{font-size:12px;color:var(--s);margin-bottom:10px}
+    .block{background:#f9fafb;border-radius:14px;padding:10px;margin-bottom:10px}
+    .block .bt{font-weight:700;font-size:13px;margin-bottom:6px}
+    .sr{display:flex;justify-content:space-between;gap:12px;margin-bottom:6px}
+    .sn{font-weight:600}
+    .note{font-size:11px;color:var(--s)}
+    .line{font-size:12px}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">DrugCompare <span>Google Sheets 版</span></div>
+  </header>
+
+  <main>
+    <!-- Home -->
+    <section id="home" class="screen active">
+      <div class="title">首頁</div>
+
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">資料來源（Google Sheets）</div>
+        <div class="small" id="sourceInfo">尚未設定。請到「設定」貼上試算表網址或 Sheet ID。</div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn" onclick="openList('all')">查看商品</button>
+          <button class="btn secondary" onclick="openSettings()">設定</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">快速說明</div>
+        <div class="small">
+          1) 你的試算表需有三個分頁：categories / stores / products。<br/>
+          2) 共享權限需允許任何有連結的人檢視（或發佈到網路）。<br/>
+          3) App 會自動用「類別」的匯率與稅率計算日本價格換算。
+        </div>
+      </div>
+    </section>
+
+    <!-- List -->
+    <section id="list" class="screen">
+      <div class="row" style="margin-top:8px;justify-content:space-between;">
+        <div style="font-weight:800;font-size:18px;">商品</div>
+        <div class="pill">
+          <button id="f_all" class="active" onclick="setFilter('all')">全部</button>
+          <button id="f_tw" onclick="setFilter('tw')">台灣</button>
+          <button id="f_jp" onclick="setFilter('jp')">日本</button>
+        </div>
+      </div>
+
+      <input id="q" class="inp" style="margin-top:10px" placeholder="搜尋商品 / 類別 / 店家（支援排序）" oninput="renderList()" />
+      <div class="small" style="margin:6px 2px 10px;">
+        搜尋排序：完全相符 ＞ 開頭相符 ＞ 中段相符 ＞ 類別/店家命中。資料量 50+ 也適用。
+      </div>
+
+      <div id="listWrap" class="list"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings" class="screen">
+      <div class="title">設定</div>
+
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">試算表網址或 Sheet ID</div>
+        <input id="sheetInput" class="inp" placeholder="貼上整個 Google Sheets 網址，或貼 Sheet ID（那串英文數字）" />
+        <div class="small" style="margin-top:6px;">
+          Sheet ID 在網址中：<br/>
+          https://docs.google.com/spreadsheets/d/<b>這一串</b>/edit
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn" onclick="saveSheetId()">儲存</button>
+          <button class="btn secondary" onclick="loadFromSheets()">載入資料</button>
+        </div>
+        <div class="small" id="loadStatus" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">若載入失敗，最常見原因</div>
+        <div class="small">
+          1) 試算表未設為「知道連結的人可檢視」。<br/>
+          2) 分頁名稱不是 categories / stores / products（大小寫不符也會失敗）。<br/>
+          3) 欄位表頭拼字不同（需與範本一致）。
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">快取</div>
+        <div class="small">為了離線仍可看資料，App 會保留上次成功載入的快取。</div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn secondary" onclick="clearCache()">清除快取</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="nav">
+    <div class="n active" id="nav_home" onclick="go('home')"><div class="i">🏠</div>首頁</div>
+    <div class="n" id="nav_list" onclick="openList('all')"><div class="i">📋</div>商品</div>
+    <div class="n" id="nav_set" onclick="openSettings()"><div class="i">⚙️</div>設定</div>
+  </nav>
+</div>
+
+<div id="bd" class="backdrop">
+  <div class="sheet">
+    <div class="handle"></div>
+    <h3 id="d_title"></h3>
+    <div class="sub" id="d_sub"></div>
+    <div id="d_blocks"></div>
+    <button class="btn" style="width:100%;margin-top:6px" onclick="closeDetail()">關閉</button>
+  </div>
+</div>
+
+<script>
+  // -------------------- Storage keys --------------------
+  const KEY_SHEET = "dc_sheet_id_or_url_v1";
+  const KEY_CACHE = "dc_cache_v1";
+
+  // -------------------- State --------------------
+  let filter = "all";
+  let categoriesById = {};
+  let stores = [];                // raw rows
+  let storesByKey = {};           // key: country|category_id -> list
+  let products = [];              // aggregated products for UI
+
+  // -------------------- Utilities --------------------
+  function show(id){
+    document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+    document.getElementById("nav_home").classList.toggle("active", id==="home");
+    document.getElementById("nav_list").classList.toggle("active", id==="list");
+    document.getElementById("nav_set").classList.toggle("active", id==="settings");
+  }
+  function go(id){ show(id); }
+  function openSettings(){ show("settings"); }
+  function openList(f){ filter=f||"all"; show("list"); setFilter(filter); renderList(); }
+  function setFilter(f){
+    filter=f;
+    ["all","tw","jp"].forEach(k=>{
+      document.getElementById("f_"+k).classList.toggle("active", k===filter);
+    });
+    renderList();
+  }
+  function closeDetail(){ document.getElementById("bd").classList.remove("active"); }
+  document.getElementById("bd").addEventListener("click", (e)=>{ if(e.target.id==="bd") closeDetail(); });
+
+  function extractSheetId(input){
+    const t = (input||"").trim();
+    if(!t) return "";
+    // If full URL
+    const m = t.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if(m && m[1]) return m[1];
+    // maybe already ID
+    return t;
+  }
+
+  // Robust CSV parse (handles quotes)
+  function parseCsv(text){
+    // remove BOM
+    if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    const rows = [];
+    let row = [];
+    let cur = "";
+    let inQ = false;
+    for(let i=0;i<text.length;i++){
+      const ch = text[i];
+      const next = text[i+1];
+
+      if(ch === '"'){
+        if(inQ && next === '"'){ cur+='"'; i++; }
+        else inQ = !inQ;
+      } else if(ch === ',' && !inQ){
+        row.push(cur); cur="";
+      } else if((ch === '\n' || ch === '\r') && !inQ){
+        if(ch === '\r' && next === '\n') i++;
+        row.push(cur); cur="";
+        // skip empty last lines
+        const allEmpty = row.every(c => (c||"").trim()==="");
+        if(!allEmpty) rows.push(row);
+        row = [];
+      } else {
+        cur += ch;
+      }
+    }
+    row.push(cur);
+    const allEmpty = row.every(c => (c||"").trim()==="");
+    if(!allEmpty) rows.push(row);
+    return rows;
+  }
+
+  function rowsToObjects(rows){
+    if(!rows.length) return [];
+    const header = rows[0].map(h => (h||"").trim());
+    const out = [];
+    for(let i=1;i<rows.length;i++){
+      const r = rows[i];
+      const obj = {};
+      header.forEach((h,idx)=> obj[h] = (r[idx] ?? "").trim());
+      out.push(obj);
+    }
+    return out;
+  }
+
+  function numOrNull(v){
+    const n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  }
+
+  // -------------------- Google Sheets fetch via gviz CSV --------------------
+  async function fetchSheetCsv(sheetId, sheetName){
+    const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error(`讀取 ${sheetName} 失敗（HTTP ${res.status}）`);
+    return await res.text();
+  }
+
+  async function loadFromSheets(){
+    const status = document.getElementById("loadStatus");
+    status.textContent = "載入中…";
+    try{
+      const raw = localStorage.getItem(KEY_SHEET) || "";
+      const sheetId = extractSheetId(raw);
+      if(!sheetId) { status.textContent = "請先儲存試算表網址或 Sheet ID。"; return; }
+
+      // Fetch 3 sheets
+      const [csvCat, csvStores, csvProd] = await Promise.all([
+        fetchSheetCsv(sheetId, "categories"),
+        fetchSheetCsv(sheetId, "stores"),
+        fetchSheetCsv(sheetId, "products"),
+      ]);
+
+      const cats = rowsToObjects(parseCsv(csvCat));
+      const st   = rowsToObjects(parseCsv(csvStores));
+      const pr   = rowsToObjects(parseCsv(csvProd));
+
+      // Validate minimal headers
+      // categories: category_id, category_name, jpy_to_twd, jp_tax_rate
+      // stores: store_id, store_name, country, category_id
+      // products: product_id, name, spec, category_id, store_id, price_twd, price_jpy_untaxed, price_jpy_tax
+      buildDataModel(cats, st, pr);
+
+      // Cache
+      localStorage.setItem(KEY_CACHE, JSON.stringify({ cats, st, pr, at: Date.now() }));
+
+      status.textContent = "載入成功。";
+      updateSourceInfo();
+      renderList();
+      show("list");
+    }catch(err){
+      console.error(err);
+      status.textContent = "載入失敗：" + err.message + "。可檢查共享權限、分頁名稱、表頭欄位。";
+      // Try fallback cache
+      const cache = localStorage.getItem(KEY_CACHE);
+      if(cache){
+        try{
+          const data = JSON.parse(cache);
+          buildDataModel(data.cats||[], data.st||[], data.pr||[]);
+          status.textContent += "（已改用上次快取資料顯示）";
+          updateSourceInfo(true);
+          renderList();
+        }catch(e){}
+      }
+    }
+  }
+
+  function clearCache(){
+    localStorage.removeItem(KEY_CACHE);
+    alert("已清除快取。");
+  }
+
+  function buildDataModel(cats, st, pr){
+    // categories
+    categoriesById = {};
+    cats.forEach(c=>{
+      const id = c.category_id;
+      if(!id) return;
+      categoriesById[id] = {
+        id,
+        name: c.category_name || id,
+        jpy_to_twd: numOrNull(c.jpy_to_twd) ?? 0.2032,
+        jp_tax_rate: numOrNull(c.jp_tax_rate) ?? 0.10
+      };
+    });
+
+    // stores registry
+    stores = st.map(r=>({
+      store_id: r.store_id,
+      store_name: r.store_name || r.store_id,
+      country: (r.country||"").toUpperCase(),
+      category_id: r.category_id
+    })).filter(x=>x.store_id && x.country && x.category_id);
+
+    storesByKey = {};
+    stores.forEach(s=>{
+      const key = `${s.country}|${s.category_id}`;
+      if(!storesByKey[key]) storesByKey[key]=[];
+      storesByKey[key].push(s);
+    });
+
+    // products rows -> aggregate by product_id
+    const byPid = {};
+    pr.forEach(r=>{
+      const pid = r.product_id;
+      if(!pid) return;
+      if(!byPid[pid]){
+        byPid[pid] = {
+          id: pid,
+          name: r.name || "",
+          spec: r.spec || "",
+          category_id: r.category_id || "",
+          photo: r.photo || "",   // optional (if later you add)
+          twPricesByStore: {},    // store_id -> {priceTwd, note?}
+          jpPricesByStore: {},    // store_id -> {untaxed, tax}
+        };
+      }
+      // keep latest name/spec/category if provided
+      if(r.name) byPid[pid].name = r.name;
+      if(r.spec) byPid[pid].spec = r.spec;
+      if(r.category_id) byPid[pid].category_id = r.category_id;
+
+      const storeId = r.store_id;
+      if(!storeId) return;
+
+      const pTwd = numOrNull(r.price_twd);
+      const pJu  = numOrNull(r.price_jpy_untaxed);
+      const pJt  = numOrNull(r.price_jpy_tax);
+
+      // Determine country by store registry if possible
+      const store = stores.find(s=>s.store_id===storeId);
+      const country = store ? store.country : "";
+
+      if(country==="TW" && pTwd!=null){
+        byPid[pid].twPricesByStore[storeId] = { priceTwd: pTwd };
+      }
+      if(country==="JP" && (pJu!=null || pJt!=null)){
+        byPid[pid].jpPricesByStore[storeId] = { untaxed: pJu, tax: pJt };
+      }
+    });
+
+    // build UI products with full store list display logic
+    products = Object.values(byPid).map(p=>{
+      const cat = categoriesById[p.category_id] || {name:p.category_id||"未分類", jpy_to_twd:0.2032, jp_tax_rate:0.10};
+      const twList = (storesByKey[`TW|${p.category_id}`] || []).map(s=>{
+        const price = p.twPricesByStore[s.store_id]?.priceTwd ?? null;
+        return { name: s.store_name, store_id: s.store_id, priceTwd: price };
+      });
+      const jpList = (storesByKey[`JP|${p.category_id}`] || []).map(s=>{
+        const it = p.jpPricesByStore[s.store_id] || {};
+        let untaxed = (it.untaxed==null? null : it.untaxed);
+        let tax = (it.tax==null? null : it.tax);
+
+        // If only untaxed exists, compute tax by category rate
+        if(untaxed!=null && tax==null){
+          tax = Math.round(untaxed * (1 + (cat.jp_tax_rate ?? 0.10)));
+        }
+        return { name: s.store_name, store_id: s.store_id, untaxed, tax };
+      });
+
+      return {
+        id: p.id,
+        name: p.name,
+        spec: p.spec,
+        category_id: p.category_id,
+        category_name: cat.name,
+        fx: cat.jpy_to_twd,
+        taxRate: cat.jp_tax_rate,
+        photo: p.photo || "",
+        twStores: twList,
+        jpStores: jpList
+      };
+    });
+  }
+
+  // -------------------- Search ranking --------------------
+  function scoreMatch(text, q){
+    if(!q) return 9999;
+    text = (text||"").toLowerCase();
+    q = q.toLowerCase();
+    if(text === q) return 0;              // perfect
+    if(text.startsWith(q)) return 1;      // prefix
+    const idx = text.indexOf(q);
+    if(idx >= 0) return 10 + idx;         // contains earlier = better
+    return 999999;
+  }
+
+  function renderList(){
+    const wrap = document.getElementById("listWrap");
+    const q = (document.getElementById("q").value||"").trim().toLowerCase();
+    wrap.innerHTML = "";
+
+    const filtered = products.filter(p=>{
+      const hasTW = p.twStores.some(s=>s.priceTwd!=null);
+      const hasJP = p.jpStores.some(s=>s.untaxed!=null || s.tax!=null);
+      if(filter==="tw" && !hasTW) return false;
+      if(filter==="jp" && !hasJP) return false;
+      return true;
+    });
+
+    // rank
+    const ranked = filtered.map(p=>{
+      const s1 = scoreMatch(p.name, q);
+      const s2 = scoreMatch(p.category_name, q) + 200;
+      const storeNames = [...p.twStores.map(s=>s.name), ...p.jpStores.map(s=>s.name)].join(" ");
+      const s3 = scoreMatch(storeNames, q) + 400;
+      const best = Math.min(s1,s2,s3);
+      return { p, best };
+    }).filter(x=> q ? x.best < 999999 : true)
+      .sort((a,b)=> a.best - b.best || a.p.name.localeCompare(b.p.name));
+
+    ranked.forEach(({p})=>{
+      // summary
+      const hasTW = p.twStores.some(s=>s.priceTwd!=null);
+      const hasJP = p.jpStores.some(s=>s.untaxed!=null || s.tax!=null);
+      let tag = hasTW && hasJP ? "台灣 + 日本" : hasTW ? "台灣" : "日本";
+
+      const twMin = hasTW ? Math.min(...p.twStores.filter(s=>s.priceTwd!=null).map(s=>s.priceTwd)) : null;
+      const jpVals = p.jpStores.flatMap(s=>[s.untaxed,s.tax]).filter(v=>typeof v==="number");
+      const jpMin = jpVals.length ? Math.min(...jpVals) : null;
+      const jpMinTwd = jpMin!=null ? Math.round(jpMin * (p.fx || 0.2032)) : null;
+
+      const item = document.createElement("div");
+      item.className = "item";
+      item.onclick = ()=>openDetail(p);
+
+      const th = document.createElement("div");
+      th.className = "thumb";
+      if(p.photo){
+        const img=document.createElement("img");
+        img.src=p.photo;
+        th.appendChild(img);
+      } else th.textContent="Photo";
+
+      const mid = document.createElement("div");
+      mid.style.flex="1";
+
+      const nm = document.createElement("div");
+      nm.className="name";
+      nm.textContent=p.name;
+
+      const sp = document.createElement("div");
+      sp.className="spec";
+      sp.textContent=`${p.spec || ""}  ·  ${p.category_name || "未分類"}`;
+
+      const meta = document.createElement("div");
+      meta.className="meta";
+      meta.innerHTML = `<div class="small">${hasTW?`台灣店:${p.twStores.length}`:"台灣店:0"} · ${hasJP?`日本店:${p.jpStores.length}`:"日本店:0"}</div>
+                        <div class="tag">${tag}</div>`;
+
+      const sum = document.createElement("div");
+      sum.className="sum";
+      if(hasTW && !hasJP){
+        sum.innerHTML = `<strong>台灣最低 NT$ ${twMin ?? "-"}</strong>`;
+      } else if(!hasTW && hasJP){
+        sum.innerHTML = `<strong>日本約 NT$ ${jpMinTwd ?? "-"}</strong>（匯率 ${p.fx}）`;
+      } else if(hasTW && hasJP){
+        sum.innerHTML = `<strong>台灣 NT$ ${twMin ?? "-"} / 日本約 NT$ ${jpMinTwd ?? "-"}</strong>（匯率 ${p.fx}）`;
+      } else {
+        sum.textContent = "尚未輸入價格";
+      }
+
+      mid.appendChild(nm);
+      mid.appendChild(sp);
+      mid.appendChild(meta);
+      mid.appendChild(sum);
+
+      item.appendChild(th);
+      item.appendChild(mid);
+      wrap.appendChild(item);
+    });
+
+    if(!ranked.length){
+      const e = document.createElement("div");
+      e.className="small";
+      e.style.margin="10px 2px";
+      e.textContent = q ? "找不到符合的商品" : "目前沒有資料（請到設定載入 Google Sheets）";
+      wrap.appendChild(e);
+    }
+  }
+
+  function openDetail(p){
+    document.getElementById("d_title").textContent = p.name;
+    document.getElementById("d_sub").textContent = `${p.spec || ""} · ${p.category_name || ""} · 匯率 1JPY≈${p.fx}NTD · 稅率 ${(p.taxRate*100).toFixed(0)}%`;
+
+    const blocks = document.getElementById("d_blocks");
+    blocks.innerHTML = "";
+
+    // Taiwan block: show ALL stores in registry for this category (even if no price)
+    const b1 = document.createElement("div");
+    b1.className="block";
+    b1.innerHTML = `<div class="bt">台灣（${p.twStores.length} 家）</div>`;
+    p.twStores.forEach(s=>{
+      const row = document.createElement("div");
+      row.className="sr";
+      row.innerHTML = `<div><div class="sn">${s.name}</div><div class="note">${s.priceTwd==null?"尚未填價":""}</div></div>
+                       <div class="sn">${s.priceTwd==null?"—":("NT$ "+s.priceTwd)}</div>`;
+      b1.appendChild(row);
+    });
+    blocks.appendChild(b1);
+
+    // Japan block: show ALL stores, compute tax if needed
+    const b2 = document.createElement("div");
+    b2.className="block";
+    b2.innerHTML = `<div class="bt">日本（${p.jpStores.length} 家）</div>`;
+    p.jpStores.forEach(s=>{
+      const row = document.createElement("div");
+      row.className="sr";
+
+      const left = document.createElement("div");
+      left.innerHTML = `<div class="sn">${s.name}</div><div class="note">${(s.untaxed==null && s.tax==null)?"尚未填價":""}</div>`;
+
+      const right = document.createElement("div");
+      const lines = [];
+      if(s.untaxed!=null){
+        lines.push(`未稅 ${s.untaxed}¥（約 NT$ ${Math.round(s.untaxed*(p.fx||0.2032))}）`);
+      }
+      if(s.tax!=null){
+        lines.push(`稅入 ${s.tax}¥（約 NT$ ${Math.round(s.tax*(p.fx||0.2032))}）`);
+      }
+      right.innerHTML = lines.length ? lines.map(l=>`<div class="line">${l}</div>`).join("") : `<div class="sn">—</div>`;
+
+      row.appendChild(left);
+      row.appendChild(right);
+      b2.appendChild(row);
+    });
+    blocks.appendChild(b2);
+
+    document.getElementById("bd").classList.add("active");
+  }
+
+  // -------------------- Settings actions --------------------
+  function saveSheetId(){
+    const v = document.getElementById("sheetInput").value.trim();
+    if(!v){ alert("請貼上試算表網址或 Sheet ID"); return; }
+    localStorage.setItem(KEY_SHEET, v);
+    updateSourceInfo();
+    alert("已儲存。建議按「載入資料」測試。");
+  }
+
+  function updateSourceInfo(usingCache=false){
+    const raw = localStorage.getItem(KEY_SHEET) || "";
+    const id = extractSheetId(raw);
+    const el = document.getElementById("sourceInfo");
+    if(!id){
+      el.textContent = "尚未設定。請到「設定」貼上試算表網址或 Sheet ID。";
+      return;
+    }
+    el.textContent = `目前 Sheet ID：${id}${usingCache?"（顯示快取）":""}`;
+    document.getElementById("sheetInput").value = raw;
+  }
+
+  // -------------------- Boot --------------------
+  updateSourceInfo();
+
+  // If cache exists, show something immediately
+  const cache = localStorage.getItem(KEY_CACHE);
+  if(cache){
+    try{
+      const data = JSON.parse(cache);
+      buildDataModel(data.cats||[], data.st||[], data.pr||[]);
+      renderList();
+    }catch(e){}
+  }
+</script>
+</body>
+</html>
