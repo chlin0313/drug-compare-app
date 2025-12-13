@@ -140,12 +140,33 @@
         </div>
       </div>
     </section>
+    <!-- Admin ⬅⬅⬅ 新增 -->
+    <section id="admin" class="screen">
+      <div class="title">管理</div>
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">
+          類別管理（匯率 / 稅率）
+        </div>
+    
+        <input id="cat_id" class="inp" placeholder="category_id（如 drugstore）" />
+        <input id="cat_name" class="inp" placeholder="category_name（如 藥妝類）" />
+        <input id="cat_fx" class="inp" placeholder="日幣匯率（如 0.2032）" />
+        <input id="cat_tax" class="inp" placeholder="日本稅率（如 0.1）" />
+    
+        <div class="row" style="margin-top:10px;">
+          <button class="btn" onclick="adminSaveCategory()">儲存</button>
+        </div>
+    
+        <div class="small" id="adminMsg" style="margin-top:8px;"></div>
+      </div>
+    </section>
   </main>
 
   <nav class="nav">
-    <div class="n active" id="nav_home" onclick="go('home')"><div class="i">🏠</div>首頁</div>
-    <div class="n" id="nav_list" onclick="openList('all')"><div class="i">📋</div>商品</div>
-    <div class="n" id="nav_set" onclick="openSettings()"><div class="i">⚙️</div>設定</div>
+    <div class="n active" id="nav_home" onclick="go('home')">首頁</div>
+    <div class="n" id="nav_list" onclick="openList('all')">商品</div>
+    <div class="n" id="nav_admin" onclick="go('admin')">管理</div>
+    <div class="n" id="nav_set" onclick="openSettings()">設定</div>
   </nav>
 </div>
 
@@ -649,6 +670,7 @@ function apiPost(action, data){
 </script>
 </body>
 </html>
+
 
 
 
