@@ -90,6 +90,16 @@
 .catHeader{display:flex;align-items:center;gap:8px;margin:2px 2px 6px;font-weight:900}
 .catHeader .small{margin-left:auto}
 
+
+.sortable{display:flex;flex-direction:column;gap:10px}
+.sortItem{display:flex;align-items:center;gap:10px;background:#fff;border-radius:14px;padding:10px;box-shadow:0 4px 10px rgba(15,23,42,.08);touch-action:none}
+.sortHandle{width:34px;height:34px;border-radius:10px;background:#f3f4ff;color:var(--p);display:flex;align-items:center;justify-content:center;font-weight:900;cursor:grab;flex:0 0 auto}
+.sortMeta{flex:1;min-width:0}
+.sortName{font-weight:800;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sortId{font-size:11px;color:var(--s)}
+.sortBadge{font-size:10px;padding:3px 8px;border-radius:999px;background:#eef2ff;color:var(--p)}
+.sortItem.dragging{opacity:.75;transform:scale(.99)}
+
 </style>
 </head>
 <body>
@@ -204,7 +214,23 @@
         </div>
         <div class="small" id="adminMsg" style="margin-top:8px;"></div>
       </div>
-    </section>
+    
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">類別順序（可拖曳）</div>
+        <div class="small" style="margin-bottom:8px;">
+          用手指按住左邊「≡」拖曳調整順序。按「儲存順序到 Google Sheets」後，其他裝置重新載入也會同步。
+        </div>
+        <div id="catSortList" class="sortable"></div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn" onclick="saveCategoryOrderToSheet()">儲存順序到 Google Sheets</button>
+          <button class="btn secondary" onclick="resetCategoryOrderLocal()">重置為 Sheet 順序</button>
+        </div>
+        <div class="small" id="catSortMsg" style="margin-top:8px;"></div>
+        <div class="small" style="margin-top:8px;">
+          注意：你的 categories 分頁需新增一欄表頭 <b>sort_order</b>，才會把順序寫回試算表。
+        </div>
+      </div>
+</section>
 </main>
 
     <button class="fab" id="fabAdd" onclick="openAddProduct()" title="新增商品">＋</button>
@@ -348,6 +374,10 @@ async function apiPost(action, data){
     const navAdmin = document.getElementById("nav_admin");
     if(navAdmin) navAdmin.classList.toggle("active", id==="admin");
     document.getElementById("nav_set").classList.toggle("active", id==="settings");
+    const navAdmin = document.getElementById("nav_admin");
+    if(navAdmin) navAdmin.classList.toggle("active", id==="admin");
+    if(id==="admin"){ try{ renderCategorySortUI(); }catch(_){} }
+
 
     // FAB only on list screen
     const fab = document.getElementById("fabAdd");
@@ -1104,7 +1134,178 @@ async function savePricesForProduct(p){
     document.getElementById("sheetInput").value = raw;
   }
 
-  // -------------------- Boot --------------------
+  
+// -------------------- Category ordering (drag & drop) --------------------
+function getLocalCatOrder_(){
+  try{ return JSON.parse(localStorage.getItem("dc_cat_order_v1") || "null"); }catch(_){ return null; }
+}
+function setLocalCatOrder_(arr){
+  localStorage.setItem("dc_cat_order_v1", JSON.stringify(arr||[]));
+}
+function clearLocalCatOrder_(){ localStorage.removeItem("dc_cat_order_v1"); }
+
+function applyLocalCatOrderToModel_(){
+  const ord = getLocalCatOrder_();
+  if(!ord || !Array.isArray(ord) || !ord.length) return;
+  const pos = new Map(ord.map((cid, i)=>[String(cid), i]));
+  Object.values(categoriesById||{}).forEach(c=>{
+    const p = pos.get(String(c.id));
+    if(p !== undefined) c.sort_order = p;
+  });
+}
+
+function setSortMsg(text, isError=false){
+  const el = document.getElementById("catSortMsg");
+  if(!el) return;
+  el.textContent = text || "";
+  el.style.color = isError ? "#b91c1c" : "";
+}
+
+function currentOrderFromDOM_(){
+  const wrap = document.getElementById("catSortList");
+  if(!wrap) return [];
+  return Array.from(wrap.querySelectorAll(".sortItem")).map(x=>x.dataset.cid);
+}
+
+function renderCategorySortUI(){
+  const wrap = document.getElementById("catSortList");
+  if(!wrap) return;
+  wrap.innerHTML = "";
+
+  applyLocalCatOrderToModel_();
+
+  const cats = Object.values(categoriesById||{}).slice().sort((a,b)=>{
+    const ao = (a.sort_order ?? 999999), bo = (b.sort_order ?? 999999);
+    if(ao !== bo) return ao - bo;
+    return compareNamesAdvanced(a.name, b.name);
+  });
+
+  cats.forEach((c, idx)=>{
+    const item = document.createElement("div");
+    item.className = "sortItem";
+    item.dataset.cid = c.id;
+
+    const handle = document.createElement("div");
+    handle.className = "sortHandle";
+    handle.textContent = "≡";
+
+    const meta = document.createElement("div");
+    meta.className = "sortMeta";
+    meta.innerHTML = `<div class="sortName">${escapeHtml(c.name)}</div><div class="sortId">${escapeHtml(c.id)}</div>`;
+
+    const badge = document.createElement("div");
+    badge.className = "sortBadge";
+    badge.textContent = `#${idx+1}`;
+
+    item.appendChild(handle);
+    item.appendChild(meta);
+    item.appendChild(badge);
+    wrap.appendChild(item);
+  });
+
+  enablePointerSortable_(wrap);
+}
+
+function saveOrderLocalFromDOM_(){
+  const ord = currentOrderFromDOM_();
+  setLocalCatOrder_(ord);
+  applyLocalCatOrderToModel_();
+  try{ renderList(); }catch(_){}
+  renderCategorySortUI();
+}
+
+function resetCategoryOrderLocal(){
+  clearLocalCatOrder_();
+  setSortMsg("已重置（改用 Sheet 內 sort_order 或預設順序）。", false);
+  loadFromSheets().then(()=>renderCategorySortUI()).catch(()=>renderCategorySortUI());
+}
+
+async function saveCategoryOrderToSheet(){
+  const ord = currentOrderFromDOM_();
+  if(!ord.length){ setSortMsg("沒有類別可儲存。", true); return; }
+  setSortMsg("儲存中…", false);
+
+  try{
+    const tasks = ord.map((cid, i)=>{
+      const c = categoriesById[cid] || { id: cid, name: cid, color:"#6554f6", jpy_to_twd:0.2032, jp_tax_rate:0.10 };
+      return apiPost("upsertCategory", {
+        category_id: cid,
+        category_name: c.name || cid,
+        jpy_to_twd: Number(c.jpy_to_twd ?? 0.2032),
+        jp_tax_rate: Number(c.jp_tax_rate ?? 0.10),
+        color: c.color || "#6554f6",
+        sort_order: i
+      });
+    });
+
+    await Promise.all(tasks);
+    setLocalCatOrder_(ord);
+    setSortMsg("已儲存到 Google Sheets。其他裝置重新載入會同步。", false);
+    await loadFromSheets();
+    renderCategorySortUI();
+  }catch(err){
+    console.error(err);
+    setSortMsg("儲存失敗：" + (err.message || err), true);
+  }
+}
+
+// Pointer-based sortable (mobile friendly)
+function enablePointerSortable_(container){
+  let dragging = null;
+  let startY = 0;
+
+  function items(){ return Array.from(container.querySelectorAll(".sortItem")); }
+  function indexOf(el){ return items().indexOf(el); }
+
+  container.onpointerdown = (e)=>{
+    const handle = e.target.closest(".sortHandle");
+    if(!handle) return;
+    const item = e.target.closest(".sortItem");
+    if(!item) return;
+
+    dragging = item;
+    startY = e.clientY;
+    item.classList.add("dragging");
+    item.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  container.onpointermove = (e)=>{
+    if(!dragging) return;
+    const y = e.clientY;
+    const dy = y - startY;
+
+    const list = items();
+    const curIndex = indexOf(dragging);
+    if(curIndex < 0) return;
+
+    const rect = dragging.getBoundingClientRect();
+    const threshold = rect.height * 0.45;
+
+    if(dy > threshold && curIndex < list.length - 1){
+      const next = list[curIndex + 1];
+      container.insertBefore(next, dragging);
+      startY = y;
+    }else if(dy < -threshold && curIndex > 0){
+      const prev = list[curIndex - 1];
+      container.insertBefore(dragging, prev);
+      startY = y;
+    }
+  };
+
+  const end = ()=>{
+    if(!dragging) return;
+    dragging.classList.remove("dragging");
+    dragging = null;
+    saveOrderLocalFromDOM_();
+  };
+
+  container.onpointerup = end;
+  container.onpointercancel = end;
+}
+
+
+// -------------------- Boot --------------------
   updateSourceInfo();
 
   // If cache exists, show something immediately
