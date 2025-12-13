@@ -160,6 +160,21 @@
 </div>
 
 <script>
+const API_URL = "https://script.google.com/macros/s/AKfycbyg0NTDkOmZkXFr2MsTlj3rOOgao202hU9gWb27SapaBFTdVLKoanR6OrL5ac7eIeiKZA/exec";
+const API_TOKEN = "313703yiYI~";
+
+async function apiPost(action, data){
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, token: API_TOKEN, data })
+  });
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error || "API 失敗");
+  return json;
+}
+
+
   // -------------------- Storage keys --------------------
   const KEY_SHEET = "dc_sheet_id_or_url_v1";
   const KEY_CACHE = "dc_cache_v1";
