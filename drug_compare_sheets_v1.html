@@ -76,6 +76,11 @@
     .fab{ right: 16px; }
   }
 
+
+    .stripe{width:6px;border-radius:16px 0 0 16px;flex:0 0 6px}
+    .catPill{display:inline-flex;align-items:center;gap:6px;font-size:10px;padding:2px 8px;border-radius:999px;color:#fff}
+    .catPillDot{width:6px;height:6px;border-radius:999px;background:rgba(255,255,255,.85)}
+
 </style>
 </head>
 <body>
@@ -172,6 +177,19 @@
         <input id="cat_name" class="inp" placeholder="category_name（如 藥妝類）" />
         <input id="cat_fx" class="inp" placeholder="日幣匯率（如 0.2032）" />
         <input id="cat_tax" class="inp" placeholder="日本稅率（如 0.1）" />
+
+        <div class="row" style="margin-top:8px;">
+          <div class="small" style="flex:1;">類別顏色</div>
+          <input id="cat_color" type="color" value="#6554f6" style="width:52px;height:40px;border:none;background:transparent;padding:0;" />
+        </div>
+        <div class="row" style="margin-top:6px;">
+          <button class="btn secondary" type="button" onclick="setCatColor('#6554f6')">紫</button>
+          <button class="btn secondary" type="button" onclick="setCatColor('#22c55e')">綠</button>
+          <button class="btn secondary" type="button" onclick="setCatColor('#f59e0b')">橘</button>
+          <button class="btn secondary" type="button" onclick="setCatColor('#ef4444')">紅</button>
+          <button class="btn secondary" type="button" onclick="setCatColor('#0ea5e9')">藍</button>
+          <button class="btn secondary" type="button" onclick="setCatColor('#8b5cf6')">紫2</button>
+        </div>
         <div class="row" style="margin-top:10px;">
           <button class="btn" onclick="adminSaveCategory()">儲存</button>
         </div>
@@ -203,7 +221,7 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbyg0NTDkOmZkXFr2MsTlj3rOOgao202hU9gWb27SapaBFTdVLKoanR6OrL5ac7eIeiKZA/exec";
 const API_TOKEN = "313703yiYI~";
 
-function apiPost(action, data){
+async function apiPost(action, data){
   return new Promise((resolve, reject) => {
     const cb = "dc_cb_" + Math.random().toString(36).slice(2);
 
@@ -224,7 +242,7 @@ function apiPost(action, data){
       "?action=" + encodeURIComponent(action) +
       "&token=" + encodeURIComponent(API_TOKEN) +
       "&callback=" + encodeURIComponent(cb) +
-      "&data=" + encodeURIComponent(JSON.stringify(data));
+      "&data=" + encodeURIComponent(JSON.stringify(data || {}));
 
     const script = document.createElement("script");
     script.src = url;
@@ -238,6 +256,61 @@ function apiPost(action, data){
   });
 }
 
+  // -------------------- Category color & overrides --------------------
+  const KEY_OVERRIDES = "dc_overrides_v1";
+  let overrides = {};
+  try{ overrides = JSON.parse(localStorage.getItem(KEY_OVERRIDES) || "{}") || {}; }catch(e){ overrides = {}; }
+
+  function setOverrideRates(category_id, fx, taxRate){
+    if(!category_id) return;
+    if(!overrides[category_id]) overrides[category_id] = {};
+    if(typeof fx === "number" && !isNaN(fx)) overrides[category_id].fx = fx;
+    if(typeof taxRate === "number" && !isNaN(taxRate)) overrides[category_id].taxRate = taxRate;
+    localStorage.setItem(KEY_OVERRIDES, JSON.stringify(overrides));
+  }
+
+  function getEffectiveFx(p){
+    const cid = p.category_id;
+    const ov = cid && overrides[cid] ? overrides[cid] : null;
+    return (ov && typeof ov.fx === "number") ? ov.fx : (p.fx || 0.2032);
+  }
+  function getEffectiveTax(p){
+    const cid = p.category_id;
+    const ov = cid && overrides[cid] ? overrides[cid] : null;
+    return (ov && typeof ov.taxRate === "number") ? ov.taxRate : (p.taxRate ?? 0.10);
+  }
+
+  function setCatColor(hex){
+    const el = document.getElementById("cat_color");
+    if(el) el.value = hex;
+  }
+
+  function hslToHex(h, s, l){
+    // h:0-360, s/l:0-100
+    s/=100; l/=100;
+    const c = (1 - Math.abs(2*l - 1)) * s;
+    const x = c * (1 - Math.abs((h/60)%2 - 1));
+    const m = l - c/2;
+    let r=0,g=0,b=0;
+    if(h<60){r=c;g=x;}
+    else if(h<120){r=x;g=c;}
+    else if(h<180){g=c;b=x;}
+    else if(h<240){g=x;b=c;}
+    else if(h<300){r=x;b=c;}
+    else {r=c;b=x;}
+    const toHex = v => ("0"+Math.round((v+m)*255).toString(16)).slice(-2);
+    return "#"+toHex(r)+toHex(g)+toHex(b);
+  }
+
+  function defaultColorForCategory(id){
+    const str = String(id||"");
+    let hash = 0;
+    for(let i=0;i<str.length;i++) hash = (hash*31 + str.charCodeAt(i)) >>> 0;
+    const h = hash % 360;
+    return hslToHex(h, 70, 50);
+  }
+
+
 
 
   // -------------------- Storage keys --------------------
@@ -250,6 +323,7 @@ function apiPost(action, data){
   let stores = [];                // raw rows
   let storesByKey = {};           // key: country|category_id -> list
   let products = [];              // aggregated products for UI
+  let currentDetailProduct = null; // for detail actions
 
   // -------------------- Utilities --------------------
   function show(id){
@@ -412,7 +486,8 @@ function apiPost(action, data){
         id,
         name: c.category_name || id,
         jpy_to_twd: numOrNull(c.jpy_to_twd) ?? 0.2032,
-        jp_tax_rate: numOrNull(c.jp_tax_rate) ?? 0.10
+        jp_tax_rate: numOrNull(c.jp_tax_rate) ?? 0.10,
+        color: (c.color && String(c.color).trim()) ? String(c.color).trim() : defaultColorForCategory(id)
       };
     });
 
@@ -473,7 +548,7 @@ function apiPost(action, data){
 
     // build UI products with full store list display logic
     products = Object.values(byPid).map(p=>{
-      const cat = categoriesById[p.category_id] || {name:p.category_id||"未分類", jpy_to_twd:0.2032, jp_tax_rate:0.10};
+      const cat = categoriesById[p.category_id] || {name:p.category_id||"未分類", jpy_to_twd:0.2032, jp_tax_rate:0.10, color: defaultColorForCategory(p.category_id)};
       const twList = (storesByKey[`TW|${p.category_id}`] || []).map(s=>{
         const price = p.twPricesByStore[s.store_id]?.priceTwd ?? null;
         return { name: s.store_name, store_id: s.store_id, priceTwd: price };
@@ -496,6 +571,7 @@ function apiPost(action, data){
         spec: p.spec,
         category_id: p.category_id,
         category_name: cat.name,
+        category_color: cat.color || defaultColorForCategory(p.category_id),
         fx: cat.jpy_to_twd,
         taxRate: cat.jp_tax_rate,
         photo: p.photo || "",
@@ -547,14 +623,21 @@ function apiPost(action, data){
       const hasJP = p.jpStores.some(s=>s.untaxed!=null || s.tax!=null);
       let tag = hasTW && hasJP ? "台灣 + 日本" : hasTW ? "台灣" : "日本";
 
+      const fx = getEffectiveFx(p);
+      const taxRate = getEffectiveTax(p); // reserved for future display
+
       const twMin = hasTW ? Math.min(...p.twStores.filter(s=>s.priceTwd!=null).map(s=>s.priceTwd)) : null;
       const jpVals = p.jpStores.flatMap(s=>[s.untaxed,s.tax]).filter(v=>typeof v==="number");
       const jpMin = jpVals.length ? Math.min(...jpVals) : null;
-      const jpMinTwd = jpMin!=null ? Math.round(jpMin * (p.fx || 0.2032)) : null;
+      const jpMinTwd = jpMin!=null ? Math.round(jpMin * (fx || 0.2032)) : null;
 
       const item = document.createElement("div");
       item.className = "item";
       item.onclick = ()=>openDetail(p);
+
+      const stripe = document.createElement("div");
+      stripe.className = "stripe";
+      stripe.style.background = p.category_color || defaultColorForCategory(p.category_id);
 
       const th = document.createElement("div");
       th.className = "thumb";
@@ -573,7 +656,10 @@ function apiPost(action, data){
 
       const sp = document.createElement("div");
       sp.className="spec";
-      sp.textContent=`${p.spec || ""}  ·  ${p.category_name || "未分類"}`;
+      const ccolor = p.category_color || defaultColorForCategory(p.category_id);
+      const cname = p.category_name || "未分類";
+      const specText = (p.spec || "").trim();
+      sp.innerHTML = `${specText ? escapeHtml(specText) + " · " : ""}<span class="catPill" style="background:${ccolor}"><span class="catPillDot"></span>${escapeHtml(cname)}</span>`;
 
       const meta = document.createElement("div");
       meta.className="meta";
@@ -585,9 +671,9 @@ function apiPost(action, data){
       if(hasTW && !hasJP){
         sum.innerHTML = `<strong>台灣最低 NT$ ${twMin ?? "-"}</strong>`;
       } else if(!hasTW && hasJP){
-        sum.innerHTML = `<strong>日本約 NT$ ${jpMinTwd ?? "-"}</strong>（匯率 ${p.fx}）`;
+        sum.innerHTML = `<strong>日本約 NT$ ${jpMinTwd ?? "-"}</strong>（匯率 ${fx}）`;
       } else if(hasTW && hasJP){
-        sum.innerHTML = `<strong>台灣 NT$ ${twMin ?? "-"} / 日本約 NT$ ${jpMinTwd ?? "-"}</strong>（匯率 ${p.fx}）`;
+        sum.innerHTML = `<strong>台灣 NT$ ${twMin ?? "-"} / 日本約 NT$ ${jpMinTwd ?? "-"}</strong>（匯率 ${fx}）`;
       } else {
         sum.textContent = "尚未輸入價格";
       }
@@ -597,6 +683,7 @@ function apiPost(action, data){
       mid.appendChild(meta);
       mid.appendChild(sum);
 
+      item.appendChild(stripe);
       item.appendChild(th);
       item.appendChild(mid);
       wrap.appendChild(item);
@@ -612,13 +699,35 @@ function apiPost(action, data){
   }
 
   function openDetail(p){
+    currentDetailProduct = p;
+
+    const fx = getEffectiveFx(p);
+    const taxRate = getEffectiveTax(p);
+
     document.getElementById("d_title").textContent = p.name;
-    document.getElementById("d_sub").textContent = `${p.spec || ""} · ${p.category_name || ""} · 匯率 1JPY≈${p.fx}NTD · 稅率 ${(p.taxRate*100).toFixed(0)}%`;
+    document.getElementById("d_sub").textContent = `${p.spec || ""} · ${p.category_name || ""} · 匯率 1JPY≈${fx}NTD · 稅率 ${(taxRate*100).toFixed(0)}%`;
 
     const blocks = document.getElementById("d_blocks");
     blocks.innerHTML = "";
 
-    // Taiwan block: show ALL stores in registry for this category (even if no price)
+    // Controls: user can override FX / tax for display, or save back to category
+    const ctrl = document.createElement("div");
+    ctrl.className = "block";
+    ctrl.innerHTML = `
+      <div class="bt">顯示設定（此類別）</div>
+      <div style="display:grid;gap:8px;">
+        <input id="d_fx" class="inp" inputmode="decimal" placeholder="台灣-日幣匯率（例如 0.2032）" value="${fx}">
+        <input id="d_tax" class="inp" inputmode="decimal" placeholder="日本稅率（例如 0.1）" value="${taxRate}">
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn secondary" type="button" onclick="applyDetailRates()">暫時套用（本機）</button>
+        <button class="btn" type="button" onclick="saveDetailRatesToCategory()">儲存到類別</button>
+      </div>
+      <div class="small" style="margin-top:6px;">「暫時套用」只影響你這台裝置的顯示；「儲存到類別」會寫回 Google Sheets，其他人也會看到。</div>
+    `;
+    blocks.appendChild(ctrl);
+
+    // Taiwan block
     const b1 = document.createElement("div");
     b1.className="block";
     b1.innerHTML = `<div class="bt">台灣（${p.twStores.length} 家）</div>`;
@@ -631,7 +740,7 @@ function apiPost(action, data){
     });
     blocks.appendChild(b1);
 
-    // Japan block: show ALL stores, compute tax if needed
+    // Japan block
     const b2 = document.createElement("div");
     b2.className="block";
     b2.innerHTML = `<div class="bt">日本（${p.jpStores.length} 家）</div>`;
@@ -642,13 +751,20 @@ function apiPost(action, data){
       const left = document.createElement("div");
       left.innerHTML = `<div class="sn">${s.name}</div><div class="note">${(s.untaxed==null && s.tax==null)?"尚未填價":""}</div>`;
 
+      // compute tax if missing using effective taxRate
+      let untaxed = (s.untaxed==null? null : s.untaxed);
+      let tax = (s.tax==null? null : s.tax);
+      if(untaxed!=null && tax==null){
+        tax = Math.round(untaxed * (1 + (taxRate ?? 0.10)));
+      }
+
       const right = document.createElement("div");
       const lines = [];
-      if(s.untaxed!=null){
-        lines.push(`未稅 ${s.untaxed}¥（約 NT$ ${Math.round(s.untaxed*(p.fx||0.2032))}）`);
+      if(untaxed!=null){
+        lines.push(`未稅 ${untaxed}¥（約 NT$ ${Math.round(untaxed*(fx||0.2032))}）`);
       }
-      if(s.tax!=null){
-        lines.push(`稅入 ${s.tax}¥（約 NT$ ${Math.round(s.tax*(p.fx||0.2032))}）`);
+      if(tax!=null){
+        lines.push(`稅入 ${tax}¥（約 NT$ ${Math.round(tax*(fx||0.2032))}）`);
       }
       right.innerHTML = lines.length ? lines.map(l=>`<div class="line">${l}</div>`).join("") : `<div class="sn">—</div>`;
 
@@ -660,6 +776,83 @@ function apiPost(action, data){
 
     document.getElementById("bd").classList.add("active");
   }
+
+  function applyDetailRates(){
+    if(!currentDetailProduct) return;
+    const fx = parseFloat(document.getElementById("d_fx")?.value || "");
+    const tax = parseFloat(document.getElementById("d_tax")?.value || "");
+    if(isNaN(fx) || fx<=0){ alert("匯率格式不正確"); return; }
+    if(isNaN(tax) || tax<0){ alert("稅率格式不正確"); return; }
+    setOverrideRates(currentDetailProduct.category_id, fx, tax);
+    // re-render detail with overrides applied
+    openDetail(currentDetailProduct);
+  }
+
+  async function saveDetailRatesToCategory(){
+    if(!currentDetailProduct) return;
+    const cid = currentDetailProduct.category_id;
+    const cat = categoriesById[cid] || { id: cid, name: currentDetailProduct.category_name || cid, color: currentDetailProduct.category_color || defaultColorForCategory(cid) };
+
+    const fx = parseFloat(document.getElementById("d_fx")?.value || "");
+    const tax = parseFloat(document.getElementById("d_tax")?.value || "");
+    if(isNaN(fx) || fx<=0){ alert("匯率格式不正確"); return; }
+    if(isNaN(tax) || tax<0){ alert("稅率格式不正確"); return; }
+
+    try{
+      await apiPost("upsertCategory", {
+        category_id: cid,
+        category_name: cat.name,
+        jpy_to_twd: fx,
+        jp_tax_rate: tax,
+        color: cat.color || defaultColorForCategory(cid)
+      });
+      // also keep local override consistent
+      setOverrideRates(cid, fx, tax);
+
+      // reload from Sheets so everyone sees latest
+      await loadFromSheets();
+      // reopen current product detail (it will use latest values)
+      const latest = (products || []).find(x => x.id === currentDetailProduct.id) || currentDetailProduct;
+      openDetail(latest);
+      alert("已儲存到類別設定（Google Sheets）。");
+    }catch(err){
+      console.error(err);
+      alert("儲存失敗：" + (err.message || err));
+    }
+  }
+
+  async function adminSaveCategory(){
+    const msg = document.getElementById("adminMsg");
+    const category_id = (document.getElementById("cat_id")?.value || "").trim();
+    const category_name = (document.getElementById("cat_name")?.value || "").trim();
+    const fx = parseFloat(document.getElementById("cat_fx")?.value || "");
+    const tax = parseFloat(document.getElementById("cat_tax")?.value || "");
+    const color = (document.getElementById("cat_color")?.value || "").trim();
+
+    if(!category_id){ msg.textContent="category_id 必填"; return; }
+    if(!category_name){ msg.textContent="category_name 必填"; return; }
+    if(isNaN(fx) || fx<=0){ msg.textContent="匯率格式不正確"; return; }
+    if(isNaN(tax) || tax<0){ msg.textContent="稅率格式不正確"; return; }
+
+    msg.textContent = "儲存中…";
+    try{
+      await apiPost("upsertCategory", {
+        category_id,
+        category_name,
+        jpy_to_twd: fx,
+        jp_tax_rate: tax,
+        color: color || defaultColorForCategory(category_id)
+      });
+      msg.textContent = "已儲存。正在重新載入…";
+      await loadFromSheets();
+      msg.textContent = "完成。";
+    }catch(err){
+      console.error(err);
+      msg.textContent = "儲存失敗：" + (err.message || err);
+    }
+  }
+
+
 
 
   // -------------------- Admin: Categories --------------------
@@ -895,4 +1088,3 @@ function apiPost(action, data){
 </script>
 </body>
 </html>
-
