@@ -54,7 +54,29 @@
     .sn{font-weight:600}
     .note{font-size:11px;color:var(--s)}
     .line{font-size:12px}
-  </style>
+  
+
+  .fab{
+    display: none;
+    position: fixed;
+    right: calc(50% - 260px + 16px);
+    bottom: 78px;
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+    border: none;
+    background: var(--p);
+    color: #fff;
+    font-size: 26px;
+    box-shadow: 0 14px 30px rgba(101,84,246,.35);
+    cursor: pointer;
+    z-index: 60;
+  }
+  @media (max-width: 520px){
+    .fab{ right: 16px; }
+  }
+
+</style>
 </head>
 <body>
 <div class="app">
@@ -140,33 +162,30 @@
         </div>
       </div>
     </section>
-    <!-- Admin ⬅⬅⬅ 新增 -->
+  
+    <!-- Admin -->
     <section id="admin" class="screen">
       <div class="title">管理</div>
       <div class="card">
-        <div style="font-weight:700;margin-bottom:6px;">
-          類別管理（匯率 / 稅率）
-        </div>
-    
+        <div style="font-weight:700;margin-bottom:6px;">類別管理（匯率 / 稅率）</div>
         <input id="cat_id" class="inp" placeholder="category_id（如 drugstore）" />
         <input id="cat_name" class="inp" placeholder="category_name（如 藥妝類）" />
         <input id="cat_fx" class="inp" placeholder="日幣匯率（如 0.2032）" />
         <input id="cat_tax" class="inp" placeholder="日本稅率（如 0.1）" />
-    
         <div class="row" style="margin-top:10px;">
           <button class="btn" onclick="adminSaveCategory()">儲存</button>
         </div>
-    
         <div class="small" id="adminMsg" style="margin-top:8px;"></div>
       </div>
     </section>
-  </main>
+</main>
 
-  <nav class="nav">
-    <div class="n active" id="nav_home" onclick="go('home')">首頁</div>
-    <div class="n" id="nav_list" onclick="openList('all')">商品</div>
-    <div class="n" id="nav_admin" onclick="go('admin')">管理</div>
-    <div class="n" id="nav_set" onclick="openSettings()">設定</div>
+    <button class="fab" id="fabAdd" onclick="openAddProduct()" title="新增商品">＋</button>
+<nav class="nav">
+    <div class="n active" id="nav_home" onclick="go('home')"><div class="i">🏠</div>首頁</div>
+    <div class="n" id="nav_list" onclick="openList('all')"><div class="i">📋</div>商品</div>
+    <div class="n" id="nav_admin" onclick="go('admin')"><div class="i">🛠️</div>管理</div>
+    <div class="n" id="nav_set" onclick="openSettings()"><div class="i">⚙️</div>設定</div>
   </nav>
 </div>
 
@@ -184,40 +203,17 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbyg0NTDkOmZkXFr2MsTlj3rOOgao202hU9gWb27SapaBFTdVLKoanR6OrL5ac7eIeiKZA/exec";
 const API_TOKEN = "313703yiYI~";
 
-function apiPost(action, data){
-  return new Promise((resolve, reject) => {
-    const cb = "dc_cb_" + Math.random().toString(36).slice(2);
-
-    window[cb] = (resp) => {
-      try{
-        if(!resp || resp.ok !== true) throw new Error(resp?.error || "API 失敗");
-        resolve(resp);
-      } catch(e){
-        reject(e);
-      } finally {
-        try{ delete window[cb]; } catch(_){}
-        script.remove();
-      }
-    };
-
-    const url =
-      API_URL +
-      "?action=" + encodeURIComponent(action) +
-      "&token=" + encodeURIComponent(API_TOKEN) +
-      "&callback=" + encodeURIComponent(cb) +
-      "&data=" + encodeURIComponent(JSON.stringify(data));
-
-    const script = document.createElement("script");
-    script.src = url;
-    script.onerror = () => {
-      reject(new Error("JSONP 載入失敗（可能是部署/權限/token 問題）"));
-      try{ delete window[cb]; } catch(_){}
-      script.remove();
-    };
-
-    document.body.appendChild(script);
+async function apiPost(action, data){
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, token: API_TOKEN, data })
   });
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error || "API 失敗");
+  return json;
 }
+
 
   // -------------------- Storage keys --------------------
   const KEY_SHEET = "dc_sheet_id_or_url_v1";
@@ -236,7 +232,13 @@ function apiPost(action, data){
     document.getElementById(id).classList.add("active");
     document.getElementById("nav_home").classList.toggle("active", id==="home");
     document.getElementById("nav_list").classList.toggle("active", id==="list");
+    const navAdmin = document.getElementById("nav_admin");
+    if(navAdmin) navAdmin.classList.toggle("active", id==="admin");
     document.getElementById("nav_set").classList.toggle("active", id==="settings");
+
+    // FAB only on list screen
+    const fab = document.getElementById("fabAdd");
+    if(fab) fab.style.display = (id==="list") ? "block" : "none";
   }
   function go(id){ show(id); }
   function openSettings(){ show("settings"); }
@@ -634,6 +636,43 @@ function apiPost(action, data){
     document.getElementById("bd").classList.add("active");
   }
 
+
+  // -------------------- Admin: Categories --------------------
+  function adminSetMsg(text, isError=false){
+    const el = document.getElementById("adminMsg");
+    if(!el) return;
+    el.textContent = text || "";
+    el.style.color = isError ? "#b91c1c" : "";
+  }
+
+  async function adminSaveCategory(){
+    adminSetMsg("");
+    const category_id = (document.getElementById("cat_id")?.value || "").trim();
+    const category_name = (document.getElementById("cat_name")?.value || "").trim();
+    const jpy_to_twd = (document.getElementById("cat_fx")?.value || "").trim();
+    const jp_tax_rate = (document.getElementById("cat_tax")?.value || "").trim();
+
+    if(!category_id){ adminSetMsg("category_id 必填", true); return; }
+    if(!category_name){ adminSetMsg("category_name 必填", true); return; }
+
+    const data = {
+      category_id,
+      category_name,
+      jpy_to_twd: jpy_to_twd === "" ? "" : Number(jpy_to_twd),
+      jp_tax_rate: jp_tax_rate === "" ? "" : Number(jp_tax_rate),
+    };
+
+    try{
+      const r = await apiPost("upsertCategory", data);
+      adminSetMsg(`儲存成功：row=${r.row}（${r.inserted ? "新增" : "更新"}）`);
+      // refresh to sync UI/cache
+      if(typeof loadFromSheets === "function") await loadFromSheets();
+    }catch(err){
+      console.error(err);
+      adminSetMsg("儲存失敗：" + (err.message || err), true);
+    }
+  }
+
   // -------------------- Settings actions --------------------
   function saveSheetId(){
     const v = document.getElementById("sheetInput").value.trim();
@@ -667,10 +706,167 @@ function apiPost(action, data){
       renderList();
     }catch(e){}
   }
+
+  // -------------------- Add Product (FAB) --------------------
+  function escapeHtml(s){
+    return String(s ?? "").replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    }[c]));
+  }
+
+  function nextProductId(){
+    const ids = (products || []).map(p => parseInt(p.id, 10)).filter(n => !isNaN(n));
+    const maxId = ids.length ? Math.max(...ids) : 0;
+    return String(maxId + 1);
+  }
+
+  function openAddProduct(){
+    if(!products || products.length === 0){
+      alert("請先到「設定」按「載入資料」，讀入目前的 Google Sheets。");
+      return;
+    }
+
+    document.getElementById("d_title").textContent = "新增商品";
+    document.getElementById("d_sub").textContent = "填完按「儲存」，會寫回 Google Sheets（products 分頁）。同一商品可新增多家店的價格。";
+
+    const blocks = document.getElementById("d_blocks");
+    const pid = nextProductId();
+
+    const catOptions = Object.values(categoriesById || {}).map(c =>
+      `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} (${escapeHtml(c.id)})</option>`
+    ).join("");
+
+    blocks.innerHTML = `
+      <div class="block">
+        <div class="bt">商品基本資料</div>
+        <div style="display:grid;gap:8px;">
+          <div class="small">product_id（自動帶入，可改，但建議不要重複）</div>
+          <input id="ap_pid" class="inp" value="${escapeHtml(pid)}" />
+          <input id="ap_name" class="inp" placeholder="商品名稱（必填）" />
+          <input id="ap_spec" class="inp" placeholder="規格（例如 50g / 170ml）" />
+          <select id="ap_cat" class="inp">
+            <option value="">選擇類別（必填）</option>
+            ${catOptions}
+          </select>
+          <input id="ap_photo" class="inp" placeholder="照片 URL（可選，若 products 分頁有 photo 欄位才會寫入）" />
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="bt">店家價格（可新增多筆）</div>
+        <div id="ap_prices" style="display:grid;gap:10px;"></div>
+        <div class="row" style="margin-top:8px;">
+          <button class="btn secondary" type="button" onclick="apAddPriceRow()">＋新增一筆店家價格</button>
+        </div>
+        <div class="small" style="margin-top:6px;">
+          台灣店填 price_twd；日本店填 price_jpy_untaxed / price_jpy_tax（可只填未稅）。
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" style="width:100%;" type="button" onclick="saveAddProduct()">儲存到 Google Sheets</button>
+      </div>
+
+      <div class="small" id="ap_msg" style="margin-top:8px;"></div>
+    `;
+
+    apAddPriceRow();
+    document.getElementById("bd").classList.add("active");
+  }
+
+  function apAddPriceRow(){
+    const wrap = document.getElementById("ap_prices");
+    if(!wrap){ return; }
+    const idx = wrap.children.length + 1;
+
+    const storeOptions = (stores || []).map(s => {
+      const label = `${s.store_name} (${s.country})`;
+      return `<option value="${escapeHtml(s.store_id)}">${escapeHtml(label)}</option>`;
+    }).join("");
+
+    const row = document.createElement("div");
+    row.className = "block";
+    row.innerHTML = `
+      <div class="bt">價格 #${idx}</div>
+      <div style="display:grid;gap:8px;">
+        <select class="inp ap_store">
+          <option value="">選擇店家（必填）</option>
+          ${storeOptions}
+        </select>
+        <input class="inp ap_twd" placeholder="台灣價格 price_twd（例如 299）" />
+        <input class="inp ap_jpu" placeholder="日本未稅 price_jpy_untaxed（例如 1470）" />
+        <input class="inp ap_jpt" placeholder="日本含稅 price_jpy_tax（例如 1617）" />
+        <button class="btn secondary" type="button">刪除此筆</button>
+      </div>
+    `;
+    row.querySelector("button").onclick = () => row.remove();
+    wrap.appendChild(row);
+  }
+
+  function apSetMsg(text, isError=false){
+    const el = document.getElementById("ap_msg");
+    if(!el) return;
+    el.textContent = text || "";
+    el.style.color = isError ? "#b91c1c" : "";
+  }
+
+  async function saveAddProduct(){
+    apSetMsg("");
+
+    const product_id = (document.getElementById("ap_pid")?.value || "").trim();
+    const name = (document.getElementById("ap_name")?.value || "").trim();
+    const spec = (document.getElementById("ap_spec")?.value || "").trim();
+    const category_id = (document.getElementById("ap_cat")?.value || "").trim();
+    const photo = (document.getElementById("ap_photo")?.value || "").trim();
+
+    if(!product_id){ apSetMsg("product_id 必填", true); return; }
+    if(!name){ apSetMsg("商品名稱必填", true); return; }
+    if(!category_id){ apSetMsg("類別必填", true); return; }
+
+    const priceBlocks = Array.from(document.querySelectorAll("#ap_prices .block"));
+    if(priceBlocks.length === 0){
+      apSetMsg("至少新增一筆店家價格", true);
+      return;
+    }
+
+    const tasks = [];
+    for(const b of priceBlocks){
+      const store_id = (b.querySelector(".ap_store")?.value || "").trim();
+      const price_twd = (b.querySelector(".ap_twd")?.value || "").trim();
+      const price_jpy_untaxed = (b.querySelector(".ap_jpu")?.value || "").trim();
+      const price_jpy_tax = (b.querySelector(".ap_jpt")?.value || "").trim();
+
+      if(!store_id) continue;
+
+      const payload = {
+        product_id, name, spec, category_id, store_id,
+        photo,
+        price_twd: price_twd === "" ? "" : Number(price_twd),
+        price_jpy_untaxed: price_jpy_untaxed === "" ? "" : Number(price_jpy_untaxed),
+        price_jpy_tax: price_jpy_tax === "" ? "" : Number(price_jpy_tax),
+      };
+
+      tasks.push(apiPost("upsertProduct", payload));
+    }
+
+    if(tasks.length === 0){
+      apSetMsg("請至少選擇一個店家並填入價格（台灣或日本擇一即可）", true);
+      return;
+    }
+
+    try{
+      apSetMsg("儲存中…");
+      await Promise.all(tasks);
+      apSetMsg("儲存成功，重新載入中…");
+      await loadFromSheets();
+      closeDetail();
+      show("list");
+    }catch(err){
+      console.error(err);
+      apSetMsg("儲存失敗：" + (err.message || err), true);
+    }
+  }
+
 </script>
 </body>
 </html>
-
-
-
-
