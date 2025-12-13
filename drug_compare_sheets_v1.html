@@ -368,22 +368,27 @@ async function apiPost(action, data){
   // -------------------- Utilities --------------------
   function show(id){
     document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
-    document.getElementById(id).classList.add("active");
-    document.getElementById("nav_home").classList.toggle("active", id==="home");
-    document.getElementById("nav_list").classList.toggle("active", id==="list");
-    const navAdmin = document.getElementById("nav_admin");
-    if(navAdmin) navAdmin.classList.toggle("active", id==="admin");
-    document.getElementById("nav_set").classList.toggle("active", id==="settings");
-    const navAdmin = document.getElementById("nav_admin");
-    if(navAdmin) navAdmin.classList.toggle("active", id==="admin");
-    if(id==="admin"){ try{ renderCategorySortUI(); }catch(_){} }
+    const el = document.getElementById(id);
+    if(el) el.classList.add("active");
 
+    const navHome = document.getElementById("nav_home");
+    const navList = document.getElementById("nav_list");
+    const navAdmin = document.getElementById("nav_admin");
+    const navSet  = document.getElementById("nav_set");
+
+    if(navHome) navHome.classList.toggle("active", id==="home");
+    if(navList) navList.classList.toggle("active", id==="list");
+    if(navAdmin) navAdmin.classList.toggle("active", id==="admin");
+    if(navSet)  navSet.classList.toggle("active", id==="settings");
+
+    if(id==="admin"){ try{ renderCategorySortUI(); }catch(_){} }
 
     // FAB only on list screen
     const fab = document.getElementById("fabAdd");
     if(fab) fab.style.display = (id==="list") ? "block" : "none";
   }
-  function go(id){ show(id); }
+  
+function go(id){ show(id); }
   function openSettings(){ show("settings"); }
   function openList(f){ filter=f||"all"; show("list"); setFilter(filter); renderList(); }
   function setFilter(f){
