@@ -85,6 +85,11 @@
     .catSection{margin:12px 2px 8px;font-weight:800;font-size:14px;display:flex;align-items:center;gap:8px}
     .catDot{width:10px;height:10px;border-radius:999px;display:inline-block}
     .catSection .small{margin-left:auto}
+.catCard{border-radius:18px;padding:10px 10px 2px;margin:10px 0;box-shadow:0 6px 14px rgba(15,23,42,.06)}
+.catCardInner{display:flex;flex-direction:column;gap:10px}
+.catHeader{display:flex;align-items:center;gap:8px;margin:2px 2px 6px;font-weight:900}
+.catHeader .small{margin-left:auto}
+
 </style>
 </head>
 <body>
@@ -574,6 +579,10 @@ async function apiPost(action, data){
         return { name: s.store_name, store_id: s.store_id, untaxed, tax };
       });
 
+      const prodOv = getProdOverride_(p.id);
+      const catOv = getCatOverride_(p.category_id);
+      const effFx = (prodOv && prodOv.fx) ? Number(prodOv.fx) : (catOv && catOv.fx) ? Number(catOv.fx) : (cat.jpy_to_twd);
+      const effTax = (prodOv && prodOv.tax) ? Number(prodOv.tax) : (catOv && catOv.tax) ? Number(catOv.tax) : (cat.jp_tax_rate);
       return {
         id: p.id,
         name: p.name,
@@ -581,8 +590,8 @@ async function apiPost(action, data){
         category_id: p.category_id,
         category_name: cat.name,
         category_color: cat.color || defaultColorForCategory(p.category_id),
-        fx: cat.jpy_to_twd,
-        taxRate: cat.jp_tax_rate,
+        fx: effFx,
+        taxRate: effTax,
         photo: p.photo || "",
         twStores: twList,
         jpStores: jpList
@@ -654,10 +663,7 @@ function renderList(){
   // 5) within category: name length asc, then name
   for(const g of orderedCats){
     g.items.sort((a,b)=>{
-      const la = (a.name||"").trim().length;
-      const lb = (b.name||"").trim().length;
-      return la - lb
-        || String(a.name||"").localeCompare(String(b.name||""), "zh-Hant")
+      return compareNamesAdvanced(a.name, b.name)
         || String(a.id||"").localeCompare(String(b.id||""));
     });
   }
@@ -672,14 +678,20 @@ function renderList(){
   }
 
   for(const g of orderedCats){
+    const card = document.createElement("div");
+    card.className = "catCard";
+    card.style.background = hexToRgba(g.color, 0.12);
+    card.style.border = `1px solid ${hexToRgba(g.color, 0.25)}`;
+    const inner = document.createElement("div");
+    inner.className = "catCardInner";
     const h = document.createElement("div");
-    h.className = "catSection";
-    h.innerHTML = `<span class="catDot" style="background:${escapeHtml(g.color)}"></span>
-                   <span>${escapeHtml(g.cname)}</span>
-                   <span class="small">${g.items.length} 項</span>`;
-    wrap.appendChild(h);
+    h.className = "catHeader";
+    h.innerHTML = `<span class="catDot" style="background:${escapeHtml(g.color)}"></span>                   <span>${escapeHtml(g.cname)}</span>                   <span class="small">${g.items.length} 項</span>`;
+    inner.appendChild(h);
+    card.appendChild(inner);
+    wrap.appendChild(card);
 
-    g.items.forEach(p=>{
+g.items.forEach(p=>{
       const hasTW = p.twStores.some(s=>s.priceTwd!=null);
       const hasJP = p.jpStores.some(s=>s.untaxed!=null || s.tax!=null);
       let tag = hasTW && hasJP ? "台灣 + 日本" : hasTW ? "台灣" : "日本";
@@ -738,95 +750,205 @@ function renderList(){
 
       item.appendChild(th);
       item.appendChild(mid);
-      wrap.appendChild(item);
+      inner.appendChild(item);
     });
   }
 }
 
+
 function openDetail(p){
-    currentDetailProduct = p;
+  document.getElementById("d_title").textContent = p.name;
+  document.getElementById("d_sub").textContent = `${p.spec || ""} · ${p.category_name || ""} ·（可直接輸入價格）`;
 
-    const fx = getEffectiveFx(p);
-    const taxRate = getEffectiveTax(p);
+  const blocks = document.getElementById("d_blocks");
+  blocks.innerHTML = "";
 
-    document.getElementById("d_title").textContent = p.name;
-    document.getElementById("d_sub").textContent = `${p.spec || ""} · ${p.category_name || ""} · 匯率 1JPY≈${fx}NTD · 稅率 ${(taxRate*100).toFixed(0)}%`;
-
-    const blocks = document.getElementById("d_blocks");
-    blocks.innerHTML = "";
-
-    // Controls: user can override FX / tax for display, or save back to category
-    const ctrl = document.createElement("div");
-    ctrl.className = "block";
-    ctrl.innerHTML = `
-      <div class="bt">匯率 / 稅率（可由使用者輸入）</div>
-      <div style="display:grid;gap:8px;">
-        <input id="d_fx" class="inp" inputmode="decimal" placeholder="台灣-日幣匯率（例如 0.2032）" value="${fx}">
-        <input id="d_tax" class="inp" inputmode="decimal" placeholder="日本稅率（例如 0.1）" value="${taxRate}">
+  // Rates override UI
+  const rateBox = document.createElement("div");
+  rateBox.className = "block";
+  rateBox.innerHTML = `
+    <div class="bt">匯率 / 稅率（可自行輸入）</div>
+    <div class="small" style="margin-bottom:6px;">可「只套用到此商品（本機）」或「寫回類別（Sheets 同步）」</div>
+    <div style="display:grid;gap:8px;">
+      <input id="rt_fx" class="inp" type="number" inputmode="decimal" step="0.0001" placeholder="匯率：1 JPY ≈ ? NTD（例如 0.2032）" value="${escapeHtml(p.fx ?? "")}"/>
+      <input id="rt_tax" class="inp" type="number" inputmode="decimal" step="0.001" placeholder="稅率：例如 0.1（10%）" value="${escapeHtml(p.taxRate ?? "")}"/>
+      <div class="row">
+        <button class="btn secondary" onclick="applyRateToProduct('${escapeHtml(p.id)}')">套用到此商品（本機）</button>
+        <button class="btn secondary" onclick="applyRateToCategoryLocal('${escapeHtml(p.category_id)}')">套用到此類別（本機）</button>
       </div>
-      <div class="row" style="margin-top:10px;">
-        <button class="btn secondary" type="button" onclick="applyDetailRatesProduct()">套用到此商品（本機）</button>
-        <button class="btn secondary" type="button" onclick="applyDetailRatesCategory()">套用到此類別（本機）</button>
+      <div class="row">
+        <button class="btn" onclick="saveRateToCategorySheet('${escapeHtml(p.category_id)}')">儲存到類別（寫回 Sheets）</button>
+        <button class="btn secondary" onclick="clearProductOverride('${escapeHtml(p.id)}')">清除此商品覆寫</button>
       </div>
-      <div class="row" style="margin-top:8px;">
-        <button class="btn" type="button" onclick="saveDetailRatesToCategory()">儲存到類別（寫回 Sheets）</button>
-        <button class="btn secondary" type="button" onclick="clearDetailRatesProduct()">清除此商品覆寫</button>
-      </div>
-      <div class="small" style="margin-top:6px;">
-        「套用到此商品」只影響這個商品在你這台裝置的換算；「套用到此類別」會影響同類別商品（本機）；「儲存到類別」會更新 Google Sheets，其他設備重新載入也會同步。
-      </div>
-    `;
-    blocks.appendChild(ctrl);
+      <div class="small" id="rt_msg"></div>
+    </div>
+  `;
+  blocks.appendChild(rateBox);
 
-    // Taiwan block
-    const b1 = document.createElement("div");
-    b1.className="block";
-    b1.innerHTML = `<div class="bt">台灣（${p.twStores.length} 家）</div>`;
-    p.twStores.forEach(s=>{
-      const row = document.createElement("div");
-      row.className="sr";
-      row.innerHTML = `<div><div class="sn">${s.name}</div><div class="note">${s.priceTwd==null?"尚未填價":""}</div></div>
-                       <div class="sn">${s.priceTwd==null?"—":("NT$ "+s.priceTwd)}</div>`;
-      b1.appendChild(row);
-    });
-    blocks.appendChild(b1);
+  // Taiwan stores editable
+  const b1 = document.createElement("div");
+  b1.className="block";
+  b1.innerHTML = `<div class="bt">台灣（${p.twStores.length} 家）</div>`;
+  p.twStores.forEach(s=>{
+    const row = document.createElement("div");
+    row.className="sr";
+    row.innerHTML = `
+      <div><div class="sn">${escapeHtml(s.name)}</div><div class="note">${s.priceTwd==null?"尚未填價":""}</div></div>
+      <div style="min-width:170px">
+        <input class="inp dc_price_twd" type="number" inputmode="numeric" step="1"
+          data-store-id="${escapeHtml(s.store_id)}" placeholder="NT$"
+          value="${s.priceTwd==null?"":escapeHtml(s.priceTwd)}"/>
+      </div>`;
+    b1.appendChild(row);
+  });
+  blocks.appendChild(b1);
 
-    // Japan block
-    const b2 = document.createElement("div");
-    b2.className="block";
-    b2.innerHTML = `<div class="bt">日本（${p.jpStores.length} 家）</div>`;
-    p.jpStores.forEach(s=>{
-      const row = document.createElement("div");
-      row.className="sr";
+  // Japan stores editable
+  const b2 = document.createElement("div");
+  b2.className="block";
+  b2.innerHTML = `<div class="bt">日本（${p.jpStores.length} 家）</div>`;
+  p.jpStores.forEach(s=>{
+    const row = document.createElement("div");
+    row.className="sr";
+    row.innerHTML = `
+      <div><div class="sn">${escapeHtml(s.name)}</div><div class="note">${(s.untaxed==null && s.tax==null)?"尚未填價":""}</div></div>
+      <div style="min-width:190px;display:grid;gap:6px">
+        <input class="inp dc_price_jpu" type="number" inputmode="numeric" step="1"
+          data-store-id="${escapeHtml(s.store_id)}" placeholder="未稅 ¥"
+          value="${s.untaxed==null?"":escapeHtml(s.untaxed)}"/>
+        <input class="inp dc_price_jpt" type="number" inputmode="numeric" step="1"
+          data-store-id="${escapeHtml(s.store_id)}" placeholder="含稅 ¥"
+          value="${s.tax==null?"":escapeHtml(s.tax)}"/>
+      </div>`;
+    b2.appendChild(row);
+  });
+  blocks.appendChild(b2);
 
-      const left = document.createElement("div");
-      left.innerHTML = `<div class="sn">${s.name}</div><div class="note">${(s.untaxed==null && s.tax==null)?"尚未填價":""}</div>`;
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn";
+  saveBtn.style.width = "100%";
+  saveBtn.style.marginTop = "6px";
+  saveBtn.textContent = "儲存此商品價格（寫回 Sheets）";
+  saveBtn.onclick = ()=>savePricesForProduct(p);
+  blocks.appendChild(saveBtn);
 
-      // compute tax if missing using effective taxRate
-      let untaxed = (s.untaxed==null? null : s.untaxed);
-      let tax = (s.tax==null? null : s.tax);
-      if(untaxed!=null && tax==null){
-        tax = Math.round(untaxed * (1 + (taxRate ?? 0.10)));
-      }
+  const msg = document.createElement("div");
+  msg.className = "small";
+  msg.id = "price_msg";
+  msg.style.marginTop = "8px";
+  blocks.appendChild(msg);
 
-      const right = document.createElement("div");
-      const lines = [];
-      if(untaxed!=null){
-        lines.push(`未稅 ${untaxed}¥（約 NT$ ${Math.round(untaxed*(fx||0.2032))}）`);
-      }
-      if(tax!=null){
-        lines.push(`稅入 ${tax}¥（約 NT$ ${Math.round(tax*(fx||0.2032))}）`);
-      }
-      right.innerHTML = lines.length ? lines.map(l=>`<div class="line">${l}</div>`).join("") : `<div class="sn">—</div>`;
+  document.getElementById("bd").classList.add("active");
+}
 
-      row.appendChild(left);
-      row.appendChild(right);
-      b2.appendChild(row);
-    });
-    blocks.appendChild(b2);
+function setMsg(id, text, isError){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = text || "";
+  el.style.color = isError ? "#b91c1c" : "";
+}
+function applyRateToProduct(pid){
+  const fx = parseFloat(document.getElementById("rt_fx").value);
+  const tax = parseFloat(document.getElementById("rt_tax").value);
+  if(isNaN(fx) || fx<=0){ setMsg("rt_msg","匯率請輸入正確數字（例如 0.2032）", true); return; }
+  if(isNaN(tax) || tax<0){ setMsg("rt_msg","稅率請輸入正確數字（例如 0.1）", true); return; }
+  localStorage.setItem("dc_prod_override_v1_" + pid, JSON.stringify({ fx, tax, at: Date.now() }));
+  setMsg("rt_msg","已套用到此商品（本機）。", false);
+  try{ renderList(); }catch(_){}
+}
+function applyRateToCategoryLocal(cid){
+  const fx = parseFloat(document.getElementById("rt_fx").value);
+  const tax = parseFloat(document.getElementById("rt_tax").value);
+  if(isNaN(fx) || fx<=0){ setMsg("rt_msg","匯率請輸入正確數字（例如 0.2032）", true); return; }
+  if(isNaN(tax) || tax<0){ setMsg("rt_msg","稅率請輸入正確數字（例如 0.1）", true); return; }
+  localStorage.setItem("dc_cat_override_v1_" + cid, JSON.stringify({ fx, tax, at: Date.now() }));
+  setMsg("rt_msg","已套用到此類別（本機）。", false);
+  try{ renderList(); }catch(_){}
+}
+async function saveRateToCategorySheet(cid){
+  const fx = parseFloat(document.getElementById("rt_fx").value);
+  const tax = parseFloat(document.getElementById("rt_tax").value);
+  if(isNaN(fx) || fx<=0){ setMsg("rt_msg","匯率請輸入正確數字（例如 0.2032）", true); return; }
+  if(isNaN(tax) || tax<0){ setMsg("rt_msg","稅率請輸入正確數字（例如 0.1）", true); return; }
 
-    document.getElementById("bd").classList.add("active");
+  const c = categoriesById[cid] || { id: cid, name: cid, color:"#6554f6" };
+  const payload = { category_id: cid, category_name: c.name || cid, jpy_to_twd: fx, jp_tax_rate: tax, color: c.color || "#6554f6" };
+  try{
+    setMsg("rt_msg","儲存中…", false);
+    await apiPost("upsertCategory", payload);
+    localStorage.setItem("dc_cat_override_v1_" + cid, JSON.stringify({ fx, tax, at: Date.now() }));
+    setMsg("rt_msg","已寫回 Sheets。其他設備重新載入後會同步。", false);
+    await loadFromSheets();
+  }catch(err){
+    setMsg("rt_msg","儲存失敗：" + (err.message||err), true);
   }
+}
+function clearProductOverride(pid){
+  localStorage.removeItem("dc_prod_override_v1_" + pid);
+  setMsg("rt_msg","已清除此商品覆寫。", false);
+  try{ renderList(); }catch(_){}
+}
+
+async function savePricesForProduct(p){
+  setMsg("price_msg","",false);
+
+  const byStore = new Map();
+
+  for(const inp of Array.from(document.querySelectorAll(".dc_price_twd"))){
+    const sid = inp.getAttribute("data-store-id");
+    const v = (inp.value||"").trim();
+    if(!sid) continue;
+    if(!byStore.has(sid)) byStore.set(sid, {});
+    byStore.get(sid).price_twd = v==="" ? "" : Number(v);
+  }
+  for(const inp of Array.from(document.querySelectorAll(".dc_price_jpu"))){
+    const sid = inp.getAttribute("data-store-id");
+    const v = (inp.value||"").trim();
+    if(!sid) continue;
+    if(!byStore.has(sid)) byStore.set(sid, {});
+    byStore.get(sid).price_jpy_untaxed = v==="" ? "" : Number(v);
+  }
+  for(const inp of Array.from(document.querySelectorAll(".dc_price_jpt"))){
+    const sid = inp.getAttribute("data-store-id");
+    const v = (inp.value||"").trim();
+    if(!sid) continue;
+    if(!byStore.has(sid)) byStore.set(sid, {});
+    byStore.get(sid).price_jpy_tax = v==="" ? "" : Number(v);
+  }
+
+  const tasks = [];
+  for(const [store_id, priceObj] of byStore.entries()){
+    const anyFilled = Object.values(priceObj).some(v => v!=="" && v!==null && v!==undefined && !Number.isNaN(v));
+    if(!anyFilled) continue;
+
+    tasks.push(apiPost("upsertProduct", {
+      product_id: p.id,
+      name: p.name,
+      spec: p.spec,
+      category_id: p.category_id,
+      store_id,
+      photo: p.photo || "",
+      ...priceObj
+    }));
+  }
+
+  if(!tasks.length){
+    setMsg("price_msg","沒有可儲存的價格（請在任一店家輸入數字）",true);
+    return;
+  }
+
+  try{
+    setMsg("price_msg","儲存中…",false);
+    await Promise.all(tasks);
+    setMsg("price_msg","已儲存成功，正在重新載入…",false);
+    await loadFromSheets();
+    const updated = (products||[]).find(x=>String(x.id)===String(p.id));
+    if(updated) openDetail(updated);
+  }catch(err){
+    setMsg("price_msg","儲存失敗：" + (err.message||err),true);
+  }
+}
+
 
   function parseDetailRates_(){
     const fx = parseFloat(document.getElementById("d_fx")?.value || "");
@@ -1002,6 +1124,52 @@ function openDetail(p){
     }[c]));
   }
 
+
+function hexToRgba(hex, a){
+  const h = String(hex||"").trim();
+  const m = h.match(/^#?([0-9a-fA-F]{6})$/);
+  if(!m) return `rgba(101,84,246,${a})`;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+function charTypeRank(name){
+  const s = (name||"").trim();
+  if(!s) return 3;
+  const ch = s[0];
+  if(/[0-9]/.test(ch)) return 0;              // numbers
+  if(/[A-Za-z]/.test(ch)) return 1;           // latin
+  return 2;                                   // others (CJK etc.)
+}
+function nameLen(name){
+  return (name||"").trim().length;
+}
+function compareNamesAdvanced(aName, bName){
+  const ta = charTypeRank(aName), tb = charTypeRank(bName);
+  if(ta !== tb) return ta - tb;
+
+  const la = nameLen(aName), lb = nameLen(bName);
+  if(la !== lb) return la - lb;
+
+  if(ta === 1){
+    return String(aName||"").toLowerCase().localeCompare(String(bName||"").toLowerCase(), "en");
+  }
+  return String(aName||"").localeCompare(String(bName||""), "zh-Hant");
+}
+function getProdOverride_(pid){
+  try{
+    return JSON.parse(localStorage.getItem("dc_prod_override_v1_" + pid) || "null");
+  }catch(_){ return null; }
+}
+function getCatOverride_(cid){
+  try{
+    return JSON.parse(localStorage.getItem("dc_cat_override_v1_" + cid) || "null");
+  }catch(_){ return null; }
+}
+
+
   function nextProductId(){
     const ids = (products || []).map(p => parseInt(p.id, 10)).filter(n => !isNaN(n));
     const maxId = ids.length ? Math.max(...ids) : 0;
@@ -1081,9 +1249,9 @@ function openDetail(p){
           <option value="">選擇店家（必填）</option>
           ${storeOptions}
         </select>
-        <input class="inp ap_twd" placeholder="台灣價格 price_twd（例如 299）" />
-        <input class="inp ap_jpu" placeholder="日本未稅 price_jpy_untaxed（例如 1470）" />
-        <input class="inp ap_jpt" placeholder="日本含稅 price_jpy_tax（例如 1617）" />
+        <input class="inp ap_twd" type="number" inputmode="numeric" step="1" placeholder="台灣價格 price_twd（例如 299）" />
+        <input class="inp ap_jpu" type="number" inputmode="numeric" step="1" placeholder="日本未稅 price_jpy_untaxed（例如 1470）" />
+        <input class="inp ap_jpt" type="number" inputmode="numeric" step="1" placeholder="日本含稅 price_jpy_tax（例如 1617）" />
         <button class="btn secondary" type="button">刪除此筆</button>
       </div>
     `;
