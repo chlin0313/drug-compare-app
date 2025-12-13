@@ -203,16 +203,41 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbyg0NTDkOmZkXFr2MsTlj3rOOgao202hU9gWb27SapaBFTdVLKoanR6OrL5ac7eIeiKZA/exec";
 const API_TOKEN = "313703yiYI~";
 
-async function apiPost(action, data){
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, token: API_TOKEN, data })
+function apiPost(action, data){
+  return new Promise((resolve, reject) => {
+    const cb = "dc_cb_" + Math.random().toString(36).slice(2);
+
+    window[cb] = (resp) => {
+      try{
+        if(!resp || resp.ok !== true) throw new Error(resp?.error || "API 失敗");
+        resolve(resp);
+      } catch(e){
+        reject(e);
+      } finally {
+        try{ delete window[cb]; } catch(_){}
+        script.remove();
+      }
+    };
+
+    const url =
+      API_URL +
+      "?action=" + encodeURIComponent(action) +
+      "&token=" + encodeURIComponent(API_TOKEN) +
+      "&callback=" + encodeURIComponent(cb) +
+      "&data=" + encodeURIComponent(JSON.stringify(data));
+
+    const script = document.createElement("script");
+    script.src = url;
+    script.onerror = () => {
+      reject(new Error("JSONP 載入失敗（可能是部署/權限/token 問題）"));
+      try{ delete window[cb]; } catch(_){}
+      script.remove();
+    };
+
+    document.body.appendChild(script);
   });
-  const json = await res.json();
-  if(!json.ok) throw new Error(json.error || "API 失敗");
-  return json;
 }
+
 
 
   // -------------------- Storage keys --------------------
@@ -870,3 +895,4 @@ async function apiPost(action, data){
 </script>
 </body>
 </html>
+
