@@ -1690,7 +1690,8 @@ function getCatOverride_(cid){
       apSetMsg("儲存失敗：" + (err.message || err), true);
     }
   }
-
+// 請補上這個函式
+function cssEscape_(s){ return String(s || "").replace(/["\\]/g, "\\$&"); }
 </script>
 </body>
 </html>
