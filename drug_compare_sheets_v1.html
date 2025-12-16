@@ -459,8 +459,19 @@ function go(id){ show(id); }
   }
 
   function numOrNull(v){
-    const n = parseFloat(v);
-    return isNaN(n) ? null : n;
+    if(v === null || v === undefined) return null;
+    if(typeof v === "number") return isFinite(v) ? v : null;
+    let s = String(v).trim();
+    if(!s) return null;
+    // remove common currency symbols / separators
+    s = s.replace(/[,]/g, "");
+    s = s.replace(/NT\$|NTD|TWD|JPY|¥|￥/gi, "");
+    s = s.replace(/\s+/g, "");
+    // keep only digits, dot, minus
+    s = s.replace(/[^0-9.\-]/g, "");
+    if(!s || s === "-" || s === "." ) return null;
+    const n = Number(s);
+    return isFinite(n) ? n : null;
   }
 
   // -------------------- Google Sheets fetch via gviz CSV --------------------
@@ -587,10 +598,11 @@ function go(id){ show(id); }
       const store = stores.find(s=>s.store_id===storeId);
       const country = store ? store.country : "";
 
-      if(country==="TW" && pTwd!=null){
+      // Be tolerant: some sheets may output currency symbols or store country may be missing/mismatched.
+      if((country==="TW" || !country) && pTwd!=null){
         byPid[pid].twPricesByStore[storeId] = { priceTwd: pTwd };
       }
-      if(country==="JP" && (pJu!=null || pJt!=null)){
+      if((country==="JP" || !country) && (pJu!=null || pJt!=null)){
         byPid[pid].jpPricesByStore[storeId] = { untaxed: pJu, tax: pJt };
       }
     });
