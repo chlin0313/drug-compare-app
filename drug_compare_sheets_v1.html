@@ -927,34 +927,48 @@ function clearProductOverride(pid){
 async function savePricesForProduct(p){
   setMsg("price_msg","",false);
 
+  // store_id -> { price_twd?, price_jpy_untaxed?, price_jpy_tax? }
   const byStore = new Map();
 
+  // 台灣價格（只在有輸入時才寫入）
   for(const inp of Array.from(document.querySelectorAll(".dc_price_twd"))){
-    const sid = inp.getAttribute("data-store-id");
-    const v = (inp.value||"").trim();
-    if(!sid) continue;
-    if(!byStore.has(sid)) byStore.set(sid, {});
-    byStore.get(sid).price_twd = v==="" ? "" : Number(v);
-  }
-  for(const inp of Array.from(document.querySelectorAll(".dc_price_jpu"))){
-    const sid = inp.getAttribute("data-store-id");
-    const v = (inp.value||"").trim();
-    if(!sid) continue;
-    if(!byStore.has(sid)) byStore.set(sid, {});
-    byStore.get(sid).price_jpy_untaxed = v==="" ? "" : Number(v);
-  }
-  for(const inp of Array.from(document.querySelectorAll(".dc_price_jpt"))){
-    const sid = inp.getAttribute("data-store-id");
-    const v = (inp.value||"").trim();
-    if(!sid) continue;
-    if(!byStore.has(sid)) byStore.set(sid, {});
-    byStore.get(sid).price_jpy_tax = v==="" ? "" : Number(v);
+    const store_id = (inp.getAttribute("data-store-id") || "").trim();
+    const v = (inp.value || "").trim();
+    if(!store_id) continue;
+
+    if(!byStore.has(store_id)) byStore.set(store_id, {});
+    if(v !== "") byStore.get(store_id).price_twd = Number(v); // ✅ 空白不送出
   }
 
+  // 日本未稅（只在有輸入時才寫入）
+  for(const inp of Array.from(document.querySelectorAll(".dc_price_jpu"))){
+    const store_id = (inp.getAttribute("data-store-id") || "").trim();
+    const v = (inp.value || "").trim();
+    if(!store_id) continue;
+
+    if(!byStore.has(store_id)) byStore.set(store_id, {});
+    if(v !== "") byStore.get(store_id).price_jpy_untaxed = Number(v); // ✅ 空白不送出
+  }
+
+  // 日本含稅（只在有輸入時才寫入）
+  for(const inp of Array.from(document.querySelectorAll(".dc_price_jpt"))){
+    const store_id = (inp.getAttribute("data-store-id") || "").trim();
+    const v = (inp.value || "").trim();
+    if(!store_id) continue;
+
+    if(!byStore.has(store_id)) byStore.set(store_id, {});
+    if(v !== "") byStore.get(store_id).price_jpy_tax = Number(v); // ✅ 空白不送出
+  }
+
+  // 組 tasks：只送「真的有填到」的欄位，避免把另一欄清空
   const tasks = [];
   for(const [store_id, priceObj] of byStore.entries()){
-    const anyFilled = Object.values(priceObj).some(v => v!=="" && v!==null && v!==undefined && !Number.isNaN(v));
-    if(!anyFilled) continue;
+    const hasAny =
+      Object.prototype.hasOwnProperty.call(priceObj, "price_twd") ||
+      Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_untaxed") ||
+      Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_tax");
+
+    if(!hasAny) continue;
 
     tasks.push(apiPost("upsertProduct", {
       product_id: p.id,
@@ -976,11 +990,15 @@ async function savePricesForProduct(p){
     setMsg("price_msg","儲存中…",false);
     await Promise.all(tasks);
     setMsg("price_msg","已儲存成功，正在重新載入…",false);
+
     await loadFromSheets();
+
+    // 重新開啟同一商品（刷新顯示）
     const updated = (products||[]).find(x=>String(x.id)===String(p.id));
     if(updated) openDetail(updated);
   }catch(err){
-    setMsg("price_msg","儲存失敗：" + (err.message||err),true);
+    console.error(err);
+    setMsg("price_msg","儲存失敗：" + (err.message || err),true);
   }
 }
 
