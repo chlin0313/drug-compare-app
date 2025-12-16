@@ -594,15 +594,11 @@ function go(id){ show(id); }
       const pJu  = numOrNull(r.price_jpy_untaxed);
       const pJt  = numOrNull(r.price_jpy_tax);
 
-      // Determine country by store registry if possible
-      const store = stores.find(s=>s.store_id===storeId);
-      const country = store ? store.country : "";
-
-      // Be tolerant: some sheets may output currency symbols or store country may be missing/mismatched.
-      if((country==="TW" || !country) && pTwd!=null){
+      // Accept prices by columns regardless of store country (store_id may exist in TW registry while JP prices are filled)
+      if(pTwd!=null){
         byPid[pid].twPricesByStore[storeId] = { priceTwd: pTwd };
       }
-      if((country==="JP" || !country) && (pJu!=null || pJt!=null)){
+      if(pJu!=null || pJt!=null){
         byPid[pid].jpPricesByStore[storeId] = { untaxed: pJu, tax: pJt };
       }
     });
