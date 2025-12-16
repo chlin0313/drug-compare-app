@@ -874,6 +874,105 @@ function openDetail(p){
   blocks.appendChild(msg);
 
   document.getElementById("bd").classList.add("active");
+  setupAutoJpCalc_(p);
+
+
+
+// -------------------- JP price auto-calc (tax-in <-> untaxed) --------------------
+function getCurrentTaxRateForDetail_(p){
+  // Prefer the override input in detail sheet; fallback to product/category default
+  const el = document.getElementById("rt_tax");
+  const v = el ? parseFloat(el.value) : NaN;
+  if(!isNaN(v) && v >= 0) return v;
+  return (typeof p.taxRate === "number" && !isNaN(p.taxRate)) ? p.taxRate : 0.10;
+}
+function calcUntaxedFromTax_(taxIncl, taxRate){
+  const r = (1 + (taxRate || 0));
+  if(!r) return null;
+  return Math.round(Number(taxIncl) / r);
+}
+function calcTaxFromUntaxed_(untaxed, taxRate){
+  return Math.round(Number(untaxed) * (1 + (taxRate || 0)));
+}
+function setupAutoJpCalc_(p){
+  const guard = new Set(); // per store_id guard
+  const getPair = (storeId) => {
+    const jpu = document.querySelector(`.dc_price_jpu[data-store-id="${cssEscape_(storeId)}"]`);
+    const jpt = document.querySelector(`.dc_price_jpt[data-store-id="${cssEscape_(storeId)}"]`);
+    return { jpu, jpt };
+  };
+
+  const bindOne = (storeId) => {
+    const { jpu, jpt } = getPair(storeId);
+    if(!jpu || !jpt) return;
+
+    const recalcFromTax = () => {
+      if(guard.has(storeId)) return;
+      const taxRate = getCurrentTaxRateForDetail_(p);
+      const taxVal = (jpt.value || "").trim();
+      const untVal = (jpu.value || "").trim();
+      if(taxVal !== "" && untVal === ""){
+        const u = calcUntaxedFromTax_(taxVal, taxRate);
+        if(u != null){
+          guard.add(storeId);
+          jpu.value = String(u);
+          guard.delete(storeId);
+        }
+      }
+    };
+
+    const recalcFromUntaxed = () => {
+      if(guard.has(storeId)) return;
+      const taxRate = getCurrentTaxRateForDetail_(p);
+      const taxVal = (jpt.value || "").trim();
+      const untVal = (jpu.value || "").trim();
+      if(untVal !== "" && taxVal === ""){
+        const t = calcTaxFromUntaxed_(untVal, taxRate);
+        guard.add(storeId);
+        jpt.value = String(t);
+        guard.delete(storeId);
+      }
+    };
+
+    jpt.addEventListener("input", recalcFromTax);
+    jpu.addEventListener("input", recalcFromUntaxed);
+  };
+
+  // Bind all JP rows
+  const jpInputs = Array.from(document.querySelectorAll(".dc_price_jpt[data-store-id]"));
+  jpInputs.forEach(inp => bindOne((inp.getAttribute("data-store-id") || "").trim()));
+
+  // When tax rate changes, fill any missing counterpart using the newest rate
+  const taxEl = document.getElementById("rt_tax");
+  if(taxEl){
+    taxEl.addEventListener("input", () => {
+      jpInputs.forEach(inp => {
+        const storeId = (inp.getAttribute("data-store-id") || "").trim();
+        const { jpu, jpt } = getPair(storeId);
+        if(!jpu || !jpt) return;
+        const taxVal = (jpt.value || "").trim();
+        const untVal = (jpu.value || "").trim();
+        const taxRate = getCurrentTaxRateForDetail_(p);
+        if(taxVal !== "" && untVal !== ""){
+          // keep user's inputs, do not override
+          return;
+        }
+        if(taxVal !== "" && untVal === ""){
+          const u = calcUntaxedFromTax_(taxVal, taxRate);
+          if(u != null) jpu.value = String(u);
+        } else if(untVal !== "" && taxVal === ""){
+          const t = calcTaxFromUntaxed_(untVal, taxRate);
+          jpt.value = String(t);
+        }
+      });
+    });
+  }
+}
+
+// CSS.escape polyfill (minimal) for attribute selectors
+function cssEscape_(s){
+  return String(s || "").replace(/["\\]/g, "\\$&");
+}
 }
 
 function setMsg(id, text, isError){
@@ -958,6 +1057,21 @@ async function savePricesForProduct(p){
 
     if(!byStore.has(store_id)) byStore.set(store_id, {});
     if(v !== "") byStore.get(store_id).price_jpy_tax = Number(v); // ✅ 空白不送出
+  }
+
+
+  // 自動補齊日本價格：只填「含稅」→算「未稅」；只填「未稅」→算「含稅」
+  const taxRateNow = getCurrentTaxRateForDetail_(p);
+  for(const [store_id, priceObj] of byStore.entries()){
+    const hasUntaxed = Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_untaxed");
+    const hasTax     = Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_tax");
+
+    if(hasTax && !hasUntaxed){
+      const u = calcUntaxedFromTax_(priceObj.price_jpy_tax, taxRateNow);
+      if(u != null) priceObj.price_jpy_untaxed = u;
+    } else if(hasUntaxed && !hasTax){
+      priceObj.price_jpy_tax = calcTaxFromUntaxed_(priceObj.price_jpy_untaxed, taxRateNow);
+    }
   }
 
   // 組 tasks：只送「真的有填到」的欄位，避免把另一欄清空
