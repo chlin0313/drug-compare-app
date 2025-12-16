@@ -109,6 +109,7 @@
   </header>
 
   <main>
+    <!-- Home -->
     <section id="home" class="screen active">
       <div class="title">首頁</div>
 
@@ -131,6 +132,7 @@
       </div>
     </section>
 
+    <!-- List -->
     <section id="list" class="screen">
       <div class="row" style="margin-top:8px;justify-content:space-between;">
         <div style="font-weight:800;font-size:18px;">商品</div>
@@ -149,6 +151,7 @@
       <div id="listWrap" class="list"></div>
     </section>
 
+    <!-- Settings -->
     <section id="settings" class="screen">
       <div class="title">設定</div>
 
@@ -184,6 +187,7 @@
       </div>
     </section>
   
+    <!-- Admin -->
     <section id="admin" class="screen">
       <div class="title">管理</div>
       <div class="card">
@@ -871,8 +875,7 @@ function openDetail(p){
 
   document.getElementById("bd").classList.add("active");
   setupAutoJpCalc_(p);
-
-} // <-- 這裡原本少了一個括號，我補上了
+}
 
 // -------------------- JP price auto-calc (tax-in <-> untaxed) --------------------
 function normalizeTaxRate_(v){
@@ -890,85 +893,104 @@ function getCurrentTaxRateForDetail_(p){
   const vRaw = el ? el.value : "";
   const v = normalizeTaxRate_(vRaw);
   if(!isNaN(v)) return v;
-  const base = (typeof p.taxRate === "number" && !isNaN(p.taxRate)) ? p.taxRate : 0.10;
+
+  const base = (p && (p.taxRate != null)) ? p.taxRate : 0.10;
   const baseN = normalizeTaxRate_(base);
   return isNaN(baseN) ? 0.10 : baseN;
 }
 function calcUntaxedFromTax_(taxIncl, taxRate){
+  const t = Number(taxIncl);
+  if(!isFinite(t)) return null;
   const r = (1 + (taxRate || 0));
-  if(!r) return null;
-  return Math.round(Number(taxIncl) / r);
+  if(!isFinite(r) || r <= 0) return null;
+  return Math.round(t / r);
 }
 function calcTaxFromUntaxed_(untaxed, taxRate){
-  return Math.round(Number(untaxed) * (1 + (taxRate || 0)));
+  const u = Number(untaxed);
+  if(!isFinite(u)) return null;
+  const r = (1 + (taxRate || 0));
+  if(!isFinite(r) || r <= 0) return null;
+  return Math.round(u * r);
 }
-// -------------------- 修正後的自動計算函式 --------------------
 function setupAutoJpCalc_(p){
-  const guard = new Set(); // 防止無窮迴圈的鎖
-  
-  // 取得同一列的兩個輸入框
+  // Goal:
+  // - When user types TAX-IN, update UNTAXED live (not only when empty)
+  // - When user types UNTAXED, update TAX-IN live
+  // - Avoid infinite loops (guard)
+  // - If user last edited one side, we treat that as the source of truth
+  const guard = new Set();               // per store_id guard
+  const lastEdited = new Map();          // store_id -> "tax" | "untaxed"
+
   const getPair = (storeId) => {
     const jpu = document.querySelector(`.dc_price_jpu[data-store-id="${cssEscape_(storeId)}"]`);
     const jpt = document.querySelector(`.dc_price_jpt[data-store-id="${cssEscape_(storeId)}"]`);
     return { jpu, jpt };
   };
 
+  const updateFromTax = (storeId) => {
+    if(guard.has(storeId)) return;
+    const { jpu, jpt } = getPair(storeId);
+    if(!jpu || !jpt) return;
+
+    const taxVal = (jpt.value || "").trim();
+    if(taxVal === "") return;
+
+    const taxRate = getCurrentTaxRateForDetail_(p);
+    const u = calcUntaxedFromTax_(taxVal, taxRate);
+    if(u == null) return;
+
+    guard.add(storeId);
+    jpu.value = String(u);
+    guard.delete(storeId);
+  };
+
+  const updateFromUntaxed = (storeId) => {
+    if(guard.has(storeId)) return;
+    const { jpu, jpt } = getPair(storeId);
+    if(!jpu || !jpt) return;
+
+    const untVal = (jpu.value || "").trim();
+    if(untVal === "") return;
+
+    const taxRate = getCurrentTaxRateForDetail_(p);
+    const t = calcTaxFromUntaxed_(untVal, taxRate);
+    if(t == null) return;
+
+    guard.add(storeId);
+    jpt.value = String(t);
+    guard.delete(storeId);
+  };
+
   const bindOne = (storeId) => {
     const { jpu, jpt } = getPair(storeId);
     if(!jpu || !jpt) return;
 
-    // 當「含稅價」改變時 -> 算未稅
-    const recalcFromTax = () => {
-      if(guard.has(storeId)) return; // 如果正在被另一個計算觸發，則停止
-      
-      const taxRate = getCurrentTaxRateForDetail_(p);
-      const taxVal = (jpt.value || "").trim();
-      
-      // 只要含稅有值，就強制計算未稅（不管未稅原本是不是空的）
-      if(taxVal !== ""){
-        const u = calcUntaxedFromTax_(taxVal, taxRate);
-        if(u != null){
-          guard.add(storeId);       // 上鎖
-          jpu.value = String(u);    // 更新未稅價
-          guard.delete(storeId);    // 解鎖
-        }
-      } else {
-        // 如果含稅被清空，也可以選擇清空未稅（視需求而定，這裡設為清空）
-        guard.add(storeId);
-        jpu.value = "";
-        guard.delete(storeId);
-      }
-    };
-
-    // 當「未稅價」改變時 -> 算含稅
-    const recalcFromUntaxed = () => {
+    jpt.addEventListener("input", () => {
       if(guard.has(storeId)) return;
+      lastEdited.set(storeId, "tax");
+      updateFromTax(storeId);
+    });
 
-      const taxRate = getCurrentTaxRateForDetail_(p);
-      const untVal = (jpu.value || "").trim();
-      
-      // 只要未稅有值，就強制計算含稅
-      if(untVal !== ""){
-        const t = calcTaxFromUntaxed_(untVal, taxRate);
-        guard.add(storeId);
-        jpt.value = String(t);
-        guard.delete(storeId);
-      } else {
-        guard.add(storeId);
-        jpt.value = "";
-        guard.delete(storeId);
-      }
-    };
+    jpu.addEventListener("input", () => {
+      if(guard.has(storeId)) return;
+      lastEdited.set(storeId, "untaxed");
+      updateFromUntaxed(storeId);
+    });
 
-    jpt.addEventListener("input", recalcFromTax);
-    jpu.addEventListener("input", recalcFromUntaxed);
+    // Initial fill:
+    // - If only one side exists, compute the other.
+    // - If both exist, do nothing.
+    const taxVal = (jpt.value || "").trim();
+    const untVal = (jpu.value || "").trim();
+    if(taxVal !== "" && untVal === "") updateFromTax(storeId);
+    if(untVal !== "" && taxVal === "") updateFromUntaxed(storeId);
   };
 
-  // 綁定所有日本店家的輸入框
+  // Bind all JP rows currently shown
   const jpInputs = Array.from(document.querySelectorAll(".dc_price_jpt[data-store-id]"));
   jpInputs.forEach(inp => bindOne((inp.getAttribute("data-store-id") || "").trim()));
 
-  // 當最上面的「稅率」改變時，重新計算所有欄位
+  // When tax rate changes, recompute counterpart based on the last-edited side
   const taxEl = document.getElementById("rt_tax");
   if(taxEl){
     taxEl.addEventListener("input", () => {
@@ -976,25 +998,30 @@ function setupAutoJpCalc_(p){
         const storeId = (inp.getAttribute("data-store-id") || "").trim();
         const { jpu, jpt } = getPair(storeId);
         if(!jpu || !jpt) return;
-        
-        // 這裡的邏輯：如果有填「未稅」，優先用未稅重算含稅
-        // 如果只填「含稅」，則反推未稅
-        const untVal = (jpu.value || "").trim();
-        const taxVal = (jpt.value || "").trim();
-        const taxRate = getCurrentTaxRateForDetail_(p);
 
-        if(untVal !== ""){
-            const t = calcTaxFromUntaxed_(untVal, taxRate);
-            jpt.value = String(t);
-        } else if (taxVal !== "") {
-            const u = calcUntaxedFromTax_(taxVal, taxRate);
-            jpu.value = String(u);
+        const mode = lastEdited.get(storeId); // may be undefined
+        const taxVal = (jpt.value || "").trim();
+        const untVal = (jpu.value || "").trim();
+
+        // If user has started editing one side, keep that as source of truth.
+        if(mode === "tax" && taxVal !== "") updateFromTax(storeId);
+        else if(mode === "untaxed" && untVal !== "") updateFromUntaxed(storeId);
+        else {
+          // no preference yet: only fill missing side
+          if(taxVal !== "" && untVal === "") updateFromTax(storeId);
+          if(untVal !== "" && taxVal === "") updateFromUntaxed(storeId);
         }
       });
+
+      try{ renderList(); }catch(_){}
     });
   }
 }
 
+function cssEscape_(s){
+  // Use in CSS attribute selectors; escape quotes and backslashes
+  return String(s || "").replace(/["\\]/g, "\\$&");
+}
 function setMsg(id, text, isError){
   const el = document.getElementById(id);
   if(!el) return;
@@ -1043,66 +1070,60 @@ function clearProductOverride(pid){
   try{ renderList(); }catch(_){}
 }
 
-// -------------------- 修正後的儲存函式 --------------------
 async function savePricesForProduct(p){
   setMsg("price_msg","",false);
 
   // store_id -> { price_twd?, price_jpy_untaxed?, price_jpy_tax? }
   const byStore = new Map();
 
-  // 1. 抓取台灣價格
+  // 台灣價格（只在有輸入時才寫入）
   for(const inp of Array.from(document.querySelectorAll(".dc_price_twd"))){
     const store_id = (inp.getAttribute("data-store-id") || "").trim();
     const v = (inp.value || "").trim();
     if(!store_id) continue;
+
     if(!byStore.has(store_id)) byStore.set(store_id, {});
-    
-    // 只有當輸入框不為空時，才更新物件
-    if(v !== "") byStore.get(store_id).price_twd = Number(v); 
+    if(v !== "") byStore.get(store_id).price_twd = Number(v); // ✅ 空白不送出
   }
 
-  // 2. 抓取日本未稅 (從頁面上抓)
+  // 日本未稅（只在有輸入時才寫入）
   for(const inp of Array.from(document.querySelectorAll(".dc_price_jpu"))){
     const store_id = (inp.getAttribute("data-store-id") || "").trim();
     const v = (inp.value || "").trim();
     if(!store_id) continue;
+
     if(!byStore.has(store_id)) byStore.set(store_id, {});
-    
-    if(v !== "") byStore.get(store_id).price_jpy_untaxed = Number(v);
+    if(v !== "") byStore.get(store_id).price_jpy_untaxed = Number(v); // ✅ 空白不送出
   }
 
-  // 3. 抓取日本含稅 (從頁面上抓)
+  // 日本含稅（只在有輸入時才寫入）
   for(const inp of Array.from(document.querySelectorAll(".dc_price_jpt"))){
     const store_id = (inp.getAttribute("data-store-id") || "").trim();
     const v = (inp.value || "").trim();
     if(!store_id) continue;
+
     if(!byStore.has(store_id)) byStore.set(store_id, {});
-    
-    if(v !== "") byStore.get(store_id).price_jpy_tax = Number(v);
+    if(v !== "") byStore.get(store_id).price_jpy_tax = Number(v); // ✅ 空白不送出
   }
 
-  // 4. (保險起見) 如果有一邊缺值，再用稅率補算一次
-  // 這是為了防止極端情況，但在上面的 setupAutoJpCalc_ 修好後，通常這裡都會有值
+
+  // 自動補齊日本價格：只填「含稅」→算「未稅」；只填「未稅」→算「含稅」
   const taxRateNow = getCurrentTaxRateForDetail_(p);
   for(const [store_id, priceObj] of byStore.entries()){
     const hasUntaxed = Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_untaxed");
     const hasTax     = Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_tax");
 
-    // 只有含稅 -> 補未稅
     if(hasTax && !hasUntaxed){
       const u = calcUntaxedFromTax_(priceObj.price_jpy_tax, taxRateNow);
       if(u != null) priceObj.price_jpy_untaxed = u;
-    } 
-    // 只有未稅 -> 補含稅
-    else if(hasUntaxed && !hasTax){
+    } else if(hasUntaxed && !hasTax){
       priceObj.price_jpy_tax = calcTaxFromUntaxed_(priceObj.price_jpy_untaxed, taxRateNow);
     }
   }
 
-  // 5. 準備送出資料 (只送出有改動的列)
+  // 組 tasks：只送「真的有填到」的欄位，避免把另一欄清空
   const tasks = [];
   for(const [store_id, priceObj] of byStore.entries()){
-    // 檢查是否有任何價格數據
     const hasAny =
       Object.prototype.hasOwnProperty.call(priceObj, "price_twd") ||
       Object.prototype.hasOwnProperty.call(priceObj, "price_jpy_untaxed") ||
@@ -1687,7 +1708,6 @@ function getCatOverride_(cid){
     }
   }
 
-function cssEscape_(s){ return String(s || "").replace(/["\\]/g, "\\$&"); }
 </script>
 </body>
 </html>
