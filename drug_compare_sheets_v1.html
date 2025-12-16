@@ -584,23 +584,14 @@ function go(id){ show(id); }
       const pJt  = numOrNull(r.price_jpy_tax);
 
       // Determine country by store registry if possible
-      const storeMatches = stores.filter(s=>s.store_id===storeId);
-      // If store_id is unique, this works as before; if not, we'll still fall back to price fields.
-      const country = storeMatches.length ? (storeMatches[0].country || "") : "";
+      const store = stores.find(s=>s.store_id===storeId);
+      const country = store ? store.country : "";
 
-      // Primary: use store registry country when available
       if(country==="TW" && pTwd!=null){
         byPid[pid].twPricesByStore[storeId] = { priceTwd: pTwd };
-      } else if(country==="JP" && (pJu!=null || pJt!=null)){
+      }
+      if(country==="JP" && (pJu!=null || pJt!=null)){
         byPid[pid].jpPricesByStore[storeId] = { untaxed: pJu, tax: pJt };
-      } else {
-        // Fallback: infer by which fields are present (handles missing/duplicate store definitions)
-        if(pTwd!=null){
-          byPid[pid].twPricesByStore[storeId] = { priceTwd: pTwd };
-        }
-        if(pJu!=null || pJt!=null){
-          byPid[pid].jpPricesByStore[storeId] = { untaxed: pJu, tax: pJt };
-        }
       }
     });
 
@@ -616,12 +607,9 @@ function go(id){ show(id); }
         let untaxed = (it.untaxed==null? null : it.untaxed);
         let tax = (it.tax==null? null : it.tax);
 
-        // If only one side exists, compute the other by category rate
-        const tr = Number(cat.jp_tax_rate ?? 0.10) || 0;
+        // If only untaxed exists, compute tax by category rate
         if(untaxed!=null && tax==null){
-          tax = Math.round(Number(untaxed) * (1 + tr));
-        } else if(tax!=null && untaxed==null){
-          untaxed = Math.round(Number(tax) / (1 + tr));
+          tax = Math.round(untaxed * (1 + (cat.jp_tax_rate ?? 0.10)));
         }
         return { name: s.store_name, store_id: s.store_id, untaxed, tax };
       });
@@ -891,27 +879,32 @@ function openDetail(p){
 
 
 // -------------------- JP price auto-calc (tax-in <-> untaxed) --------------------
+function normalizeTaxRate_(v){
+  // Accept 0.1 (10%) or 10 (10%). Clamp to sane range.
+  let n = parseFloat(v);
+  if(isNaN(n)) return NaN;
+  if(n > 1.5) n = n / 100; // treat as percent
+  if(n < 0) n = 0;
+  if(n > 1) n = 1;
+  return n;
+}
 function getCurrentTaxRateForDetail_(p){
   // Prefer the override input in detail sheet; fallback to product/category default
   const el = document.getElementById("rt_tax");
-  const v = el ? parseFloat(el.value) : NaN;
-  if(!isNaN(v) && v >= 0) return v;
-  return (typeof p.taxRate === "number" && !isNaN(p.taxRate)) ? p.taxRate : 0.10;
+  const vRaw = el ? el.value : "";
+  const v = normalizeTaxRate_(vRaw);
+  if(!isNaN(v)) return v;
+  const base = (typeof p.taxRate === "number" && !isNaN(p.taxRate)) ? p.taxRate : 0.10;
+  const baseN = normalizeTaxRate_(base);
+  return isNaN(baseN) ? 0.10 : baseN;
 }
 function calcUntaxedFromTax_(taxIncl, taxRate){
-  const tr = Number(taxRate);
-  const r = 1 + (Number.isFinite(tr) ? tr : 0);
-  if(!Number.isFinite(r) || r<=0) return null;
-  const v = Number(taxIncl);
-  if(!Number.isFinite(v)) return null;
-  return Math.round(v / r);
+  const r = (1 + (taxRate || 0));
+  if(!r) return null;
+  return Math.round(Number(taxIncl) / r);
 }
 function calcTaxFromUntaxed_(untaxed, taxRate){
-  const tr = Number(taxRate);
-  const r = 1 + (Number.isFinite(tr) ? tr : 0);
-  const v = Number(untaxed);
-  if(!Number.isFinite(v)) return null;
-  return Math.round(v * r);
+  return Math.round(Number(untaxed) * (1 + (taxRate || 0)));
 }
 function setupAutoJpCalc_(p){
   const guard = new Set(); // per store_id guard
@@ -1042,7 +1035,7 @@ function clearProductOverride(pid){
   try{ renderList(); }catch(_){}
 }
 
-async function savePricesForProduct(p){
+async async function savePricesForProduct(p){
   setMsg("price_msg","",false);
 
   // store_id -> { price_twd?, price_jpy_untaxed?, price_jpy_tax? }
@@ -1089,8 +1082,7 @@ async function savePricesForProduct(p){
       const u = calcUntaxedFromTax_(priceObj.price_jpy_tax, taxRateNow);
       if(u != null) priceObj.price_jpy_untaxed = u;
     } else if(hasUntaxed && !hasTax){
-      const t = calcTaxFromUntaxed_(priceObj.price_jpy_untaxed, taxRateNow);
-      if(t!=null) priceObj.price_jpy_tax = t;
+      priceObj.price_jpy_tax = calcTaxFromUntaxed_(priceObj.price_jpy_untaxed, taxRateNow);
     }
   }
 
