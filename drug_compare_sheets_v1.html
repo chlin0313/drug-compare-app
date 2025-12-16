@@ -1135,27 +1135,6 @@ async function savePricesForProduct(p){
     await Promise.all(tasks);
     setMsg("price_msg","已儲存成功，正在重新載入…",false);
 
-    await loadFromSheets(); // 重新讀取 Sheets 以確保資料同步
-
-    // 重新開啟同一商品（刷新顯示，確保資料正確）
-    const updated = (products||[]).find(x=>String(x.id)===String(p.id));
-    if(updated) openDetail(updated);
-  }catch(err){
-    console.error(err);
-    setMsg("price_msg","儲存失敗：" + (err.message || err),true);
-  }
-}
-
-  if(!tasks.length){
-    setMsg("price_msg","沒有可儲存的價格（請在任一店家輸入數字）",true);
-    return;
-  }
-
-  try{
-    setMsg("price_msg","儲存中…",false);
-    await Promise.all(tasks);
-    setMsg("price_msg","已儲存成功，正在重新載入…",false);
-
     await loadFromSheets();
 
     // 重新開啟同一商品（刷新顯示）
