@@ -732,17 +732,45 @@ function openDetail(productId){
   blocks.innerHTML = "";
 
   const defaultTax = getDefaultTaxRate_(p);
-  blocks.innerHTML += `
-    <div class="block">
-      <div class="bt">本次顯示覆寫（不寫回）</div>
-      <div class="grid2">
-        <input id="ov_tax" class="inp" placeholder="稅率（如 0.1 或 10）" value="${escapeHtml(defaultTax)}"/>
-        <input id="ov_fx_jpy" class="inp" placeholder="JPY→TWD 匯率（如 0.2032，可空）" value="${escapeHtml(getDefaultFxToTwd_(p,'JPY') ?? '')}"/>
-      </div>
-      <div class="small" style="margin-top:6px;">稅率用於日本未稅/含稅互算；匯率用於顯示「約 NT$」。</div>
-    </div>
-  `;
+blocks.innerHTML += `
+  <div class="block">
+    <div class="bt">日本價格計算設定（僅本畫面，不寫回 Sheets）</div>
 
+    <div class="grid2" style="gap:8px;">
+      <div>
+        <div class="small" style="font-weight:800;margin:0 0 6px;color:#374151;">
+          日本消費稅率（含稅/未稅互算）
+        </div>
+        <input
+          id="ov_tax"
+          class="inp"
+          inputmode="decimal"
+          placeholder="例：0.1（10%）或 10"
+          value="${escapeHtml(defaultTax)}"
+        />
+        <div class="small" style="margin-top:6px;">
+          影響日本「含稅 ↔ 未稅」自動換算。
+        </div>
+      </div>
+
+      <div>
+        <div class="small" style="font-weight:800;margin:0 0 6px;color:#374151;">
+          日幣 → 台幣匯率（僅顯示約 NT$）
+        </div>
+        <input
+          id="ov_fx_jpy"
+          class="inp"
+          inputmode="decimal"
+          placeholder="例：0.2032（可空）"
+          value="${escapeHtml(getDefaultFxToTwd_(p,'JPY') ?? '')}"
+        />
+        <div class="small" style="margin-top:6px;">
+          不影響儲存價格，只影響「約 NT$」顯示。
+        </div>
+      </div>
+    </div>
+  </div>
+`;
   const catStores = (storesByCat[p.category_id] || []);
   const countries = [...new Set(catStores.map(s=>s.country_code).filter(Boolean))].sort();
 
@@ -1063,4 +1091,5 @@ window.addEventListener("load", ()=>{
 </script>
 </body>
 </html>
+
 
