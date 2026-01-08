@@ -7,7 +7,7 @@
   <style>
     :root{--p:#6554f6;--pl:#ebe9ff;--bg:#f5f5fb;--t:#1f2933;--s:#7b8794;--danger:#b91c1c}
     *{box-sizing:border-box}
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--t)}
+    body{margin:0;font-family:"Microsoft JhengHei","微軟正黑體",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--t)}
     .app{max-width:560px;margin:0 auto;min-height:100vh;background:#fff;box-shadow:0 0 30px rgba(0,0,0,.06)}
     header{padding:14px 18px 10px;position:sticky;top:0;background:#fff;z-index:9;border-bottom:1px solid #eef0f6}
     .brand{font-weight:900;color:var(--p);font-size:18px}
@@ -437,7 +437,7 @@ function buildModel(){
       store_id,
       store_name: s.store_name || store_id,
       country_code: (s.country_code || s.country || "").toUpperCase(),
-      currency: (s.currency||"").toUpperCase(),
+      currency: ((s.currency||"").toUpperCase() || (((s.country_code || s.country || "").toUpperCase()==="JP")?"JPY":(((s.country_code || s.country || "").toUpperCase()==="TW")?"TWD":""))),
       category_id: s.category_id || "",
       enabled: (String(s.enabled||"TRUE").toUpperCase() !== "FALSE")
     };
@@ -732,45 +732,23 @@ function openDetail(productId){
   blocks.innerHTML = "";
 
   const defaultTax = getDefaultTaxRate_(p);
-blocks.innerHTML += `
-  <div class="block">
-    <div class="bt">日本價格計算設定（僅本畫面，不寫回 Sheets）</div>
-
-    <div class="grid2" style="gap:8px;">
-      <div>
-        <div class="small" style="font-weight:800;margin:0 0 6px;color:#374151;">
-          日本消費稅率（含稅/未稅互算）
+  blocks.innerHTML += `
+    <div class="block">
+      <div class="bt">本次顯示覆寫（不寫回）</div>
+      <div class="grid2">
+        <div>
+          <div class="small" style="margin:0 0 4px 2px;">日本消費稅率（用於未稅/含稅互算）</div>
+          <input id="ov_tax" class="inp" placeholder="例如 0.1 或 10" value="${escapeHtml(defaultTax)}"/>
         </div>
-        <input
-          id="ov_tax"
-          class="inp"
-          inputmode="decimal"
-          placeholder="例：0.1（10%）或 10"
-          value="${escapeHtml(defaultTax)}"
-        />
-        <div class="small" style="margin-top:6px;">
-          影響日本「含稅 ↔ 未稅」自動換算。
+        <div>
+          <div class="small" style="margin:0 0 4px 2px;">JPY→TWD 匯率（用於顯示「約 NT$」）</div>
+          <input id="ov_fx_jpy" class="inp" placeholder="例如 0.2032（可空）" value="${escapeHtml(getDefaultFxToTwd_(p,'JPY') ?? '')}"/>
         </div>
       </div>
-
-      <div>
-        <div class="small" style="font-weight:800;margin:0 0 6px;color:#374151;">
-          日幣 → 台幣匯率（僅顯示約 NT$）
-        </div>
-        <input
-          id="ov_fx_jpy"
-          class="inp"
-          inputmode="decimal"
-          placeholder="例：0.2032（可空）"
-          value="${escapeHtml(getDefaultFxToTwd_(p,'JPY') ?? '')}"
-        />
-        <div class="small" style="margin-top:6px;">
-          不影響儲存價格，只影響「約 NT$」顯示。
-        </div>
-      </div>
+      <div class="small" style="margin-top:6px;">稅率用於日本未稅/含稅互算；匯率用於顯示「約 NT$」。</div>
     </div>
-  </div>
-`;
+  `;
+
   const catStores = (storesByCat[p.category_id] || []);
   const countries = [...new Set(catStores.map(s=>s.country_code).filter(Boolean))].sort();
 
@@ -925,11 +903,99 @@ async function saveDetail(){
   }
 }
 
-function nextProductId_(){
-  const ids = Object.keys(productsById||{}).map(x=>parseInt(x,10)).filter(n=>!isNaN(n));
-  const maxId = ids.length ? Math.max(...ids) : 0;
-  return String(maxId + 1);
+
+function nextProductIdForCategory_(categoryId){
+  const cid = (categoryId||"").trim();
+  if(!cid) return "";
+  // Prefer IDs like "category-12". Fallback: pure number within same category.
+  let maxN = 0;
+  Object.values(productsById||{}).forEach(p=>{
+    if((p.category_id||"") !== cid) return;
+    const pid = String(p.product_id||"").trim();
+    let n = null;
+    const m = pid.match(new RegExp("^" + cid.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "-(\\d+)$"));
+    if(m) n = parseInt(m[1],10);
+    else if(/^\d+$/.test(pid)) n = parseInt(pid,10);
+    if(n && n>maxN) maxN = n;
+  });
+  return `${cid}-${maxN+1}`;
 }
+
+function slugifyStoreId_(name, country){
+  const base = (name||"").trim()
+    .toLowerCase()
+    .replace(/[\u3000\s]+/g,"_")
+    .replace(/[^a-z0-9_]+/g,"")
+    .replace(/^_+|_+$/g,"") || "store";
+  const cc = (country||"").toLowerCase() || "xx";
+  let id = `${base}_${cc}`;
+  // ensure uniqueness in current model
+  if(!storesById[id]){
+    return id;
+  }
+  let i=2;
+  while(storesById[`${id}${i}`]) i++;
+  return `${id}${i}`;
+}
+
+function renderAddStorePriceInputs_(categoryId){
+  const holder = document.getElementById("np_store_prices");
+  if(!holder) return;
+  holder.innerHTML = "";
+
+  if(!categoryId){
+    holder.innerHTML = `<div class="small">請先選擇類別，才能輸入店家與價格。</div>`;
+    return;
+  }
+  const catStores = (storesByCat[categoryId] || []).filter(s=>s.enabled !== false);
+  if(!catStores.length){
+    holder.innerHTML = `<div class="small">此類別目前沒有店家。你可以先在下方新增店家，再儲存。</div>`;
+  }
+
+  const groupByCountry = {};
+  catStores.forEach(s=>{
+    const cc = (s.country_code||"").toUpperCase() || "NA";
+    if(!groupByCountry[cc]) groupByCountry[cc] = [];
+    groupByCountry[cc].push(s);
+  });
+
+  const countries = Object.keys(groupByCountry).sort();
+  countries.forEach(cc=>{
+    const storeList = groupByCountry[cc];
+    const block = document.createElement("div");
+    block.className="block";
+    block.innerHTML = `<div class="bt">${escapeHtml(cc)}（${storeList.length} 家）</div>`;
+    storeList.forEach(st=>{
+      const cur = st.currency || ((cc==="JP")?"JPY":(cc==="TW")?"TWD":"");
+      const row = document.createElement("div");
+      row.style.marginBottom="10px";
+      row.innerHTML = `
+        <div class="sr">
+          <div>
+            <div class="sn">${escapeHtml(st.store_name)}</div>
+            <div class="note">${escapeHtml(st.store_id)} · ${escapeHtml(cur)}</div>
+          </div>
+          <div class="small">${escapeHtml(cc)}</div>
+        </div>
+      `;
+      if(cc==="JP"){
+        row.innerHTML += `
+          <div class="grid2">
+            <input class="inp np_price_jp_untaxed" data-store-id="${escapeHtml(st.store_id)}" placeholder="未稅（UNTAXED）" inputmode="decimal"/>
+            <input class="inp np_price_jp_taxed" data-store-id="${escapeHtml(st.store_id)}" placeholder="含稅（TAXED）" inputmode="decimal"/>
+          </div>
+        `;
+      }else{
+        row.innerHTML += `
+          <input class="inp np_price_list" data-store-id="${escapeHtml(st.store_id)}" placeholder="價格（LIST）" inputmode="decimal"/>
+        `;
+      }
+      block.appendChild(row);
+    });
+    holder.appendChild(block);
+  });
+}
+
 function openAddProduct(){
   if(!Object.keys(categoriesById||{}).length){
     alert("請先到「設定」載入資料。");
@@ -938,18 +1004,18 @@ function openAddProduct(){
   currentDetailProductId = "__NEW__";
 
   document.getElementById("d_title").textContent = "新增商品";
-  document.getElementById("d_sub").textContent = "填完按「儲存（寫回 Sheets）」。";
+  document.getElementById("d_sub").textContent = "可同時建立店家與輸入價格；填完按「儲存（寫回 Sheets）」。";
 
-  const catOptions = Object.values(categoriesById).sort((a,b)=>String(a.name).localeCompare(String(b.name),"zh-Hant"))
+  const catOptions = Object.values(categoriesById)
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name),"zh-Hant"))
     .map(c=>`<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} (${escapeHtml(c.id)})</option>`).join("");
 
-  const pid = nextProductId_();
   document.getElementById("d_blocks").innerHTML = `
     <div class="block">
       <div class="bt">商品基本資料</div>
       <div style="display:grid;gap:8px;">
-        <div class="small">product_id（可改，但需唯一）</div>
-        <input id="np_pid" class="inp" value="${escapeHtml(pid)}"/>
+        <div class="small">product_id（依類別自動產生；可改，但需唯一）</div>
+        <input id="np_pid" class="inp" placeholder="先選擇類別後自動產生" />
         <input id="np_name" class="inp" placeholder="商品名稱（必填）"/>
         <input id="np_spec" class="inp" placeholder="規格（可空，例如 50ml）"/>
         <select id="np_cat" class="sel">
@@ -959,9 +1025,123 @@ function openAddProduct(){
         <input id="np_photo" class="inp" placeholder="圖片 URL（可空）"/>
       </div>
     </div>
+
+    <div class="block">
+      <div class="bt">新增時的「日本稅率 / 匯率」覆寫（不寫回）</div>
+      <div class="grid2">
+        <div>
+          <div class="small" style="margin:0 0 4px 2px;">日本消費稅率</div>
+          <input id="np_tax" class="inp" placeholder="例如 0.1 或 10" value="0.1"/>
+        </div>
+        <div>
+          <div class="small" style="margin:0 0 4px 2px;">JPY→TWD 匯率</div>
+          <input id="np_fx_jpy" class="inp" placeholder="例如 0.2032（可空）"/>
+        </div>
+      </div>
+      <div class="small" style="margin-top:6px;">稅率用於日本未稅/含稅互算；匯率用於顯示「約 NT$」。</div>
+    </div>
+
+    <div class="block">
+      <div class="bt">店家與價格（可先不填，之後再進商品修改）</div>
+      <div id="np_store_prices"></div>
+    </div>
+
+    <div class="block">
+      <div class="bt">（可選）新增店家並寫回 stores</div>
+      <div class="small">若此類別沒有你要的店家，可在這裡建立（store_id 建議自動產生）。</div>
+      <div class="grid2" style="margin-top:8px;">
+        <input id="ns_name" class="inp" placeholder="店家名稱（例如 無印良品）"/>
+        <select id="ns_country" class="sel">
+          <option value="TW">TW</option>
+          <option value="JP">JP</option>
+        </select>
+      </div>
+      <div class="grid2" style="margin-top:8px;">
+        <input id="ns_id" class="inp" placeholder="store_id（可空＝自動）"/>
+        <input id="ns_currency" class="inp" placeholder="幣別（TW=TWD, JP=JPY，可改）"/>
+      </div>
+      <div class="small" style="margin-top:6px;">建立店家後，儲存商品會一起寫回；下次載入就會出現在店家清單。</div>
+    </div>
   `;
+
+  const catSel = document.getElementById("np_cat");
+  const pidEl = document.getElementById("np_pid");
+  const taxEl = document.getElementById("np_tax");
+  const fxEl  = document.getElementById("np_fx_jpy");
+  const nsCountry = document.getElementById("ns_country");
+  const nsCurrency = document.getElementById("ns_currency");
+
+  const syncNewIdAndStores = ()=>{
+    const cid = (catSel.value||"").trim();
+    if(cid){
+      const pid = nextProductIdForCategory_(cid);
+      if(pidEl && !pidEl.value) pidEl.value = pid;
+      const defTax = categoriesById[cid]?.default_tax_rate ?? 0.1;
+      if(taxEl && (!taxEl.value)) taxEl.value = String(defTax);
+      const defFx = categoriesById[cid]?.default_fx_to_twd ?? getFxToTwd_("JPY");
+      if(fxEl && (!fxEl.value) && defFx) fxEl.value = String(defFx);
+    }
+    renderAddStorePriceInputs_(cid);
+  };
+
+  if(catSel){
+    catSel.addEventListener("change", ()=>{
+      if(pidEl) pidEl.value = ""; // force regenerate on change
+      syncNewIdAndStores();
+    });
+  }
+  if(nsCountry && nsCurrency){
+    const syncCur = ()=>{
+      const cc = (nsCountry.value||"").toUpperCase();
+      nsCurrency.value = (cc==="JP")?"JPY":(cc==="TW")?"TWD":"";
+    };
+    nsCountry.addEventListener("change", syncCur);
+    syncCur();
+  }
+
+  // When user types JP taxed/untaxed, auto-calc in add modal as well
+  const autoCalc = ()=>{
+    const tax = normalizeTaxRate_(taxEl?.value, 0.10);
+    document.querySelectorAll(".np_price_jp_taxed").forEach(t=>{
+      const sid = t.getAttribute("data-store-id");
+      const u = document.querySelector(`.np_price_jp_untaxed[data-store-id="${CSS.escape(sid)}"]`);
+      if(!u) return;
+      const tv = cleanNumber_(t.value);
+      const uv = cleanNumber_(u.value);
+      if(tv !== "" && uv === "") u.value = String(calcUntaxedFromTax_(tv, tax));
+      else if(uv !== "" && tv === "") t.value = String(calcTaxFromUntaxed_(uv, tax));
+    });
+  };
+
   document.getElementById("bd").classList.add("active");
   setDetailMsg("");
+
+  syncNewIdAndStores();
+
+  // bind after initial render
+  setTimeout(()=>{
+    document.querySelectorAll(".np_price_jp_taxed").forEach(inp=>{
+      inp.addEventListener("input", ()=>{
+        const tax = normalizeTaxRate_(taxEl?.value, 0.10);
+        const sid = inp.getAttribute("data-store-id");
+        const u = document.querySelector(`.np_price_jp_untaxed[data-store-id="${CSS.escape(sid)}"]`);
+        if(!u) return;
+        const val = calcUntaxedFromTax_(inp.value, tax);
+        if(val !== "") u.value = String(val);
+      });
+    });
+    document.querySelectorAll(".np_price_jp_untaxed").forEach(inp=>{
+      inp.addEventListener("input", ()=>{
+        const tax = normalizeTaxRate_(taxEl?.value, 0.10);
+        const sid = inp.getAttribute("data-store-id");
+        const t = document.querySelector(`.np_price_jp_taxed[data-store-id="${CSS.escape(sid)}"]`);
+        if(!t) return;
+        const val = calcTaxFromUntaxed_(inp.value, tax);
+        if(val !== "") t.value = String(val);
+      });
+    });
+    if(taxEl) taxEl.addEventListener("input", autoCalc);
+  },0);
 }
 
 async function saveNewProduct_(){
@@ -973,12 +1153,61 @@ async function saveNewProduct_(){
     const photo = (document.getElementById("np_photo")?.value || "").trim();
 
     if(!pid) throw new Error("product_id 必填");
+    if(productsById[pid]) throw new Error("product_id 已存在，請換一個（或改為不同編號）");
     if(!name) throw new Error("商品名稱必填");
     if(!cid) throw new Error("類別必填");
 
-    setDetailMsg("新增商品中…");
+    // Optional new store
+    const nsName = (document.getElementById("ns_name")?.value || "").trim();
+    const nsCountry = (document.getElementById("ns_country")?.value || "").trim().toUpperCase();
+    let nsId = (document.getElementById("ns_id")?.value || "").trim();
+    const nsCurrency = (document.getElementById("ns_currency")?.value || "").trim().toUpperCase();
+
+    setDetailMsg("新增中…");
+
+    if(nsName){
+      if(!nsId) nsId = slugifyStoreId_(nsName, nsCountry);
+      const storePayload = {
+        store_id: nsId,
+        store_name: nsName,
+        country_code: nsCountry,
+        country: nsCountry,
+        currency: nsCurrency || ((nsCountry==="JP")?"JPY":(nsCountry==="TW")?"TWD":""),
+        category_id: cid,
+        enabled: "TRUE",
+      };
+      await apiJsonp("upsertStore", storePayload);
+    }
+
     const payload = { product_id:pid, name, spec, category_id:cid, photo_url:photo, active:"TRUE" };
     await apiJsonp("upsertProduct", payload);
+
+    // Save initial prices if provided
+    const tax = normalizeTaxRate_(document.getElementById("np_tax")?.value, 0.10);
+
+    const tasks = [];
+    document.querySelectorAll(".np_price_list").forEach(inp=>{
+      const sid = inp.getAttribute("data-store-id");
+      const amount = cleanNumber_(inp.value);
+      if(amount==="") return;
+      const key = `${pid}|${sid}|LIST`;
+      tasks.push(apiJsonp("upsertPrice", { price_id:key, product_id:pid, store_id:sid, price_type:"LIST", amount:Number(amount) }));
+    });
+
+    document.querySelectorAll(".np_price_jp_untaxed").forEach(inp=>{
+      const sid = inp.getAttribute("data-store-id");
+      const u = cleanNumber_(inp.value);
+      const tEl = document.querySelector(`.np_price_jp_taxed[data-store-id="${CSS.escape(sid)}"]`);
+      const t = tEl ? cleanNumber_(tEl.value) : "";
+      let untaxed = u, taxed = t;
+      if(taxed !== "" && untaxed === "") untaxed = calcUntaxedFromTax_(taxed, tax);
+      if(untaxed !== "" && taxed === "") taxed = calcTaxFromUntaxed_(untaxed, tax);
+
+      if(untaxed !== "") tasks.push(apiJsonp("upsertPrice", { price_id:`${pid}|${sid}|UNTAXED`, product_id:pid, store_id:sid, price_type:"UNTAXED", amount:Number(untaxed), tax_rate: tax }));
+      if(taxed !== "")  tasks.push(apiJsonp("upsertPrice", { price_id:`${pid}|${sid}|TAXED`,   product_id:pid, store_id:sid, price_type:"TAXED",   amount:Number(taxed),   tax_rate: tax }));
+    });
+
+    if(tasks.length) await Promise.all(tasks);
 
     setDetailMsg("已新增。重新載入…");
     await loadAll();
@@ -990,6 +1219,7 @@ async function saveNewProduct_(){
     setDetailMsg("新增失敗：" + (err.message || err), true);
   }
 }
+
 
 function setAdminMsg(id, msg, err=false){
   const el = document.getElementById(id);
@@ -1091,5 +1321,3 @@ window.addEventListener("load", ()=>{
 </script>
 </body>
 </html>
-
-
