@@ -63,11 +63,12 @@
     .sr{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;align-items:center}
     .sn{font-weight:800}
     .note{font-size:11px;color:var(--s)}
-    .line{font-size:12px}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .msg{font-size:12px;margin-top:8px}
     .msg.ok{color:#065f46}
     .msg.err{color:var(--danger)}
+    .warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;padding:10px 12px;border-radius:14px;font-size:12px;line-height:1.45}
+    code.k{background:#111827;color:#fff;padding:2px 6px;border-radius:8px;font-size:11px}
   </style>
 </head>
 <body>
@@ -87,12 +88,22 @@
           <button class="btn secondary" onclick="openSettings()">設定</button>
         </div>
       </div>
+
+      <div class="card">
+        <div style="font-weight:900;margin-bottom:6px;">重要：如果你看到「Failed to fetch」</div>
+        <div class="warn">
+          這代表瀏覽器無法讀取 Google Sheets 的 CSV（常見原因是試算表未公開檢視）。<br/>
+          請到試算表右上角「共用」把一般存取權改成「知道連結的任何人：檢視者」，或使用「發佈到網路」。<br/>
+          然後回來按「載入資料」即可。
+        </div>
+      </div>
+
       <div class="card">
         <div style="font-weight:900;margin-bottom:6px;">你目前的 5 Sheets</div>
         <div class="small">
-          categories / stores / products / prices / fx_rates<br/>
+          <b>categories / stores / products / prices / fx_rates</b><br/>
           讀取：用 gviz CSV（需開放檢視或發佈）。<br/>
-          寫入：透過 Apps Script Web App（JSONP），可從手機/平板直接新增與修改。
+          寫入：透過 Apps Script Web App（JSONP）寫回。
         </div>
       </div>
     </section>
@@ -119,8 +130,10 @@
       <div class="title">管理</div>
 
       <div class="card">
-        <div style="font-weight:900;margin-bottom:6px;">類別（顏色 / 預設稅率 / 排序）</div>
-        <div class="small">此頁是「快速編輯」。完整管理建議仍在 Google Sheets 操作。</div>
+        <div style="font-weight:900;margin-bottom:6px;">類別（顏色 / 預設稅率 / 排序 / 前綴）</div>
+        <div class="small">
+          若你要商品 ID 變成 <b>A-1 / B-1</b> 這種格式，請在 <code class="k">categories</code> 分頁新增欄位 <code class="k">category_prefix</code>（例如 drugstore=A, groceries=B）。
+        </div>
 
         <div class="grid2" style="margin-top:10px;">
           <input id="cat_id" class="inp" placeholder="category_id（如 drugstore）" />
@@ -133,6 +146,9 @@
         <div class="grid2" style="margin-top:8px;">
           <input id="cat_tax" class="inp" placeholder="default_tax_rate（如 0.1 或 10）" />
           <input id="cat_fx" class="inp" placeholder="default_fx_to_twd（如 0.2032，可空）" />
+        </div>
+        <div style="margin-top:8px;">
+          <input id="cat_prefix" class="inp" placeholder="category_prefix（如 A / B / C，可空）" />
         </div>
 
         <div class="row" style="margin-top:10px;">
@@ -221,7 +237,7 @@
 
 <script>
 const KEY_SHEET = "dc5_sheet_id_or_url";
-const KEY_CACHE = "dc5_cache_v1";
+const KEY_CACHE = "dc5_cache_v2"; // bump cache version
 const KEY_API_URL = "dc5_api_url";
 const KEY_API_TOKEN = "dc5_api_token";
 
@@ -425,6 +441,7 @@ function buildModel(){
       sort_order: cleanNumber_(c.sort_order) === "" ? null : Number(cleanNumber_(c.sort_order)),
       default_tax_rate: normalizeTaxRate_(c.default_tax_rate, 0.10),
       default_fx_to_twd: cleanNumber_(c.default_fx_to_twd) === "" ? null : Number(cleanNumber_(c.default_fx_to_twd)),
+      prefix: (c.category_prefix || "").trim(), // ✅ for A-1/B-1
     };
   });
 
@@ -903,22 +920,23 @@ async function saveDetail(){
   }
 }
 
-
+// ✅ A-1/B-1 per category
 function nextProductIdForCategory_(categoryId){
   const cid = (categoryId||"").trim();
   if(!cid) return "";
-  // Prefer IDs like "category-12". Fallback: pure number within same category.
+  const prefix = (categoriesById[cid]?.prefix || "").trim();
+  if(!prefix) return ""; // require prefix
   let maxN = 0;
   Object.values(productsById||{}).forEach(p=>{
     if((p.category_id||"") !== cid) return;
     const pid = String(p.product_id||"").trim();
-    let n = null;
-    const m = pid.match(new RegExp("^" + cid.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "-(\\d+)$"));
-    if(m) n = parseInt(m[1],10);
-    else if(/^\d+$/.test(pid)) n = parseInt(pid,10);
-    if(n && n>maxN) maxN = n;
+    const m = pid.match(new RegExp("^" + prefix.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\$&") + "-(\\d+)$"));
+    if(m){
+      const n = parseInt(m[1], 10);
+      if(Number.isFinite(n) && n > maxN) maxN = n;
+    }
   });
-  return `${cid}-${maxN+1}`;
+  return `${prefix}-${maxN+1}`;
 }
 
 function slugifyStoreId_(name, country){
@@ -929,10 +947,7 @@ function slugifyStoreId_(name, country){
     .replace(/^_+|_+$/g,"") || "store";
   const cc = (country||"").toLowerCase() || "xx";
   let id = `${base}_${cc}`;
-  // ensure uniqueness in current model
-  if(!storesById[id]){
-    return id;
-  }
+  if(!storesById[id]) return id;
   let i=2;
   while(storesById[`${id}${i}`]) i++;
   return `${id}${i}`;
@@ -1076,17 +1091,26 @@ function openAddProduct(){
     if(cid){
       const pid = nextProductIdForCategory_(cid);
       if(pidEl && !pidEl.value) pidEl.value = pid;
+
       const defTax = categoriesById[cid]?.default_tax_rate ?? 0.1;
       if(taxEl && (!taxEl.value)) taxEl.value = String(defTax);
+
       const defFx = categoriesById[cid]?.default_fx_to_twd ?? getFxToTwd_("JPY");
       if(fxEl && (!fxEl.value) && defFx) fxEl.value = String(defFx);
+
+      // warn if prefix missing
+      if(!categoriesById[cid]?.prefix){
+        setDetailMsg("提醒：此類別尚未設定 category_prefix，product_id 不會自動產生（請到 categories 加欄位 category_prefix）。", true);
+      }else{
+        setDetailMsg("");
+      }
     }
     renderAddStorePriceInputs_(cid);
   };
 
   if(catSel){
     catSel.addEventListener("change", ()=>{
-      if(pidEl) pidEl.value = ""; // force regenerate on change
+      if(pidEl) pidEl.value = "";
       syncNewIdAndStores();
     });
   }
@@ -1099,26 +1123,10 @@ function openAddProduct(){
     syncCur();
   }
 
-  // When user types JP taxed/untaxed, auto-calc in add modal as well
-  const autoCalc = ()=>{
-    const tax = normalizeTaxRate_(taxEl?.value, 0.10);
-    document.querySelectorAll(".np_price_jp_taxed").forEach(t=>{
-      const sid = t.getAttribute("data-store-id");
-      const u = document.querySelector(`.np_price_jp_untaxed[data-store-id="${CSS.escape(sid)}"]`);
-      if(!u) return;
-      const tv = cleanNumber_(t.value);
-      const uv = cleanNumber_(u.value);
-      if(tv !== "" && uv === "") u.value = String(calcUntaxedFromTax_(tv, tax));
-      else if(uv !== "" && tv === "") t.value = String(calcTaxFromUntaxed_(uv, tax));
-    });
-  };
-
   document.getElementById("bd").classList.add("active");
   setDetailMsg("");
-
   syncNewIdAndStores();
 
-  // bind after initial render
   setTimeout(()=>{
     document.querySelectorAll(".np_price_jp_taxed").forEach(inp=>{
       inp.addEventListener("input", ()=>{
@@ -1140,7 +1148,6 @@ function openAddProduct(){
         if(val !== "") t.value = String(val);
       });
     });
-    if(taxEl) taxEl.addEventListener("input", autoCalc);
   },0);
 }
 
@@ -1152,12 +1159,11 @@ async function saveNewProduct_(){
     const cid = (document.getElementById("np_cat")?.value || "").trim();
     const photo = (document.getElementById("np_photo")?.value || "").trim();
 
-    if(!pid) throw new Error("product_id 必填");
+    if(!pid) throw new Error("product_id 必填（若要自動生成請設定 categories.category_prefix）");
     if(productsById[pid]) throw new Error("product_id 已存在，請換一個（或改為不同編號）");
     if(!name) throw new Error("商品名稱必填");
     if(!cid) throw new Error("類別必填");
 
-    // Optional new store
     const nsName = (document.getElementById("ns_name")?.value || "").trim();
     const nsCountry = (document.getElementById("ns_country")?.value || "").trim().toUpperCase();
     let nsId = (document.getElementById("ns_id")?.value || "").trim();
@@ -1182,7 +1188,6 @@ async function saveNewProduct_(){
     const payload = { product_id:pid, name, spec, category_id:cid, photo_url:photo, active:"TRUE" };
     await apiJsonp("upsertProduct", payload);
 
-    // Save initial prices if provided
     const tax = normalizeTaxRate_(document.getElementById("np_tax")?.value, 0.10);
 
     const tasks = [];
@@ -1220,7 +1225,6 @@ async function saveNewProduct_(){
   }
 }
 
-
 function setAdminMsg(id, msg, err=false){
   const el = document.getElementById(id);
   if(!el) return;
@@ -1236,6 +1240,7 @@ async function adminSaveCategory(){
       sort_order: (document.getElementById("cat_order").value||"").trim(),
       default_tax_rate: (document.getElementById("cat_tax").value||"").trim(),
       default_fx_to_twd: (document.getElementById("cat_fx").value||"").trim(),
+      category_prefix: (document.getElementById("cat_prefix").value||"").trim(),
     };
     if(!payload.category_id) throw new Error("category_id 必填");
     setAdminMsg("adminMsg","儲存中…");
